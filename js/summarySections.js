@@ -307,6 +307,7 @@ const INSIGHT_ICON_PATHS = {
   trend: { fill: 'none', d: '<path d="M4 16l6-6 4 4 7-8"/><path d="M14 6h7v7"/>' },
   star: { fill: 'currentColor', d: '<path d="M12 4.2l2.5 5 5.6.8-4.1 4 1 5.5-5-2.6-5 2.6 1-5.5-4.1-4 5.6-.8Z"/>' },
   analytics: { fill: 'none', d: '<path d="M4 20V11"/><path d="M11 20V4"/><path d="M18 20v-6"/>' },
+  target: { fill: 'none', d: '<circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/>' },
 };
 
 function insightIconHtml(kind) {
@@ -338,6 +339,23 @@ export function recapBestStretchHtml(window) {
     headline: 'Best Stretch',
     sub: `Balls ${window.startBall}–${window.endBall} • ${window.solidPct}% Solid`,
   });
+}
+
+// One deterministic, forward-looking challenge for next time — see
+// sessionStory.js's getNextGoal for the selection logic. Deliberately a
+// compact secondary card (reuses insight-card's dark surface), never
+// another giant gauge — this is a nudge, not a second hero metric.
+export function nextGoalCardHtml(goal) {
+  if (!goal) return '';
+  return `
+    <div class="insight-card next-goal-card">
+      <span class="insight-icon">${insightIconHtml('target')}</span>
+      <div class="next-goal-text">
+        <div class="next-goal-eyebrow">Next Goal</div>
+        <div class="next-goal-title">${escapeHtml(goal.title)}</div>
+        <div class="next-goal-detail">${escapeHtml(goal.detail)}</div>
+      </div>
+    </div>`;
 }
 
 // The recap's one path into the full detailed analytics for this session —

@@ -6,12 +6,12 @@ import {
 } from '../ui.js';
 import { sessionSummary, strikeBreakdown } from '../stats.js';
 import { getComparisonContext, getPersonalBests } from '../sessionAnalysis.js';
-import { buildRecapInsight } from '../sessionStory.js';
+import { buildRecapInsight, getNextGoal } from '../sessionStory.js';
 import {
   comparisonSectionHtml, bestWindowSectionHtml, bestWindowComparisonSectionHtml,
   targetAccuracySectionHtml, streaksSectionHtml, distanceDetailHtml,
   recapMetaHtml, recapArcHtml, recapSecondaryMetricsHtml, insightCardHtml, recapBestStretchHtml,
-  exploreSessionRowHtml,
+  exploreSessionRowHtml, nextGoalCardHtml,
   shotTimelineHtml, timelineLegendHtml, bindShotTimeline, blocksFlowHtml, firstLastCompactHtml,
   conditionsGroupHtml, groupTitleHtml,
 } from '../summarySections.js';
@@ -26,6 +26,7 @@ export function renderSummary(root, sessionId) {
   const comparison = getComparisonContext(session, shots, s.bestWindow);
   const personalBests = getPersonalBests(session, shots, s);
   const insight = buildRecapInsight(s, comparison, personalBests, session, shots);
+  const nextGoal = getNextGoal(s, shots, session);
 
   const { primary: locationPrimary, secondary: locationSecondary } = db.sessionLocationDisplay(session);
   const locationLabel = locationPrimary || (session.location_candidates?.length ? `${session.location_candidates.length} nearby options` : 'Not set');
@@ -71,6 +72,8 @@ export function renderSummary(root, sessionId) {
     ` : ''}
 
     ${recapBestStretchHtml(s.bestWindow)}
+
+    ${nextGoal ? nextGoalCardHtml(nextGoal) : ''}
 
     ${exploreSessionRowHtml()}
   `;
