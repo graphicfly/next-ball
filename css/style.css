@@ -1865,6 +1865,14 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 .insight-headline { font-size: var(--text-label); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-accent); margin-bottom: 2px; }
 .insight-sub { font-size: var(--text-body); color: var(--color-text-primary); }
 
+/* Next Goal — same dark-card shell as .insight-card (via next-goal-card
+   sharing that class), but its own 3-line stack: a small green eyebrow
+   label above the goal itself, which is what should draw the eye. */
+.next-goal-text { flex: 1; min-width: 0; }
+.next-goal-eyebrow { font-size: var(--text-label); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-accent); margin-bottom: 2px; }
+.next-goal-title { font-size: var(--text-body-lg); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
+.next-goal-detail { font-size: var(--text-caption); color: var(--color-text-secondary); margin-top: 2px; }
+
 /* Recap's entry point into the full detailed analytics — a secondary
    surface row (not a bright primary CTA) so Done stays the obvious primary
    action; the whole button is the tap target, not just the text/chevron. */
