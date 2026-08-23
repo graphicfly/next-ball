@@ -1,0 +1,6 @@
+.DS_Store
+*.psd
+*.jpg
+deploy/
+z_frames/
+direction pie chart/
