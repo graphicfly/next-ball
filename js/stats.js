@@ -422,6 +422,33 @@ export function firstLastCompare(shots) {
   return { first10, last10, overlapping: sorted.length < 20 };
 }
 
+// Aggregates every shot by the club it was actually hit with, in
+// first-appearance order — deliberately shot-level rather than the
+// session's default_club, since club can change mid-session and a session
+// that went 10x 7i then 5x PW must report both. Same shape and the same
+// underlying calculators as drillBreakdown/trainingAidBreakdown below; this
+// only groups the existing numbers by a different field.
+export function clubBreakdown(shots) {
+  const order = [];
+  for (const s of [...shots].sort((a, b) => a.shot_number - b.shot_number)) {
+    if (s.club && !order.includes(s.club)) order.push(s.club);
+  }
+  return order.map((name) => {
+    const clubShots = shots.filter((s) => s.club === name);
+    const strike = strikeBreakdown(clubShots);
+    const dir = directionBreakdown(clubShots);
+    const dist = distanceStats(clubShots);
+    return {
+      club: name,
+      count: clubShots.length,
+      solidPct: strike.solid.pct,
+      toppedFatPct: round1(strike.topped.pct + strike.fat.pct),
+      straightPct: dir.straight.pct,
+      medianSolidDistance: dist.medianSolid,
+    };
+  });
+}
+
 // Aggregates every shot by its recorded drill (shots with no drill are
 // skipped), in the order each drill was first practiced during the session.
 export function drillBreakdown(shots) {
@@ -516,6 +543,7 @@ export function sessionSummary(shots) {
     distance: distanceStats(shots),
     blocks: tenBallBlocks(shots),
     firstLast: firstLastCompare(shots),
+    clubs: clubBreakdown(shots),
     drills: drillBreakdown(shots),
     trainingAids: trainingAidBreakdown(shots),
     timing: shotTimingStats(shots),

@@ -1502,6 +1502,126 @@ textarea { min-height: 76px; resize: vertical; }
   align-items: center;
 }
 
+/* ---------- Explore Session accordion ---------- */
+/* Four collapsible sections, all closed on open, one open at a time. The
+   section container is the only card on the screen — individual metrics
+   inside use plain rows and spacing rather than nested boxes. */
+
+.xs-section {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+.xs-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: var(--space-4);
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text-primary);
+  -webkit-tap-highlight-color: transparent;
+}
+.xs-head:active { opacity: 0.85; }
+.xs-icon {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.xs-icon svg { width: 19px; height: 19px; }
+.xs-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.xs-title {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.xs-summary {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xs-chevron {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  display: flex;
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+.xs-chevron svg { width: 20px; height: 20px; }
+.xs-section.open .xs-chevron { transform: rotate(180deg); }
+
+/* Height is set explicitly in JS from the measured content, then cleared
+   once the transition ends, so an expanded panel can still reflow (e.g. the
+   nested "More distance stats" toggle) without being clipped by a stale
+   fixed height. */
+.xs-body {
+  height: 0;
+  overflow: hidden;
+  transition: height var(--duration-base) var(--ease-standard);
+}
+/* Once an opened panel has finished animating, JS clears its inline height
+   and this takes over — so the panel sits at auto height and can still grow
+   if its own content expands (the nested "More distance stats" toggle). */
+.xs-section.open .xs-body { height: auto; }
+.xs-body[hidden] { display: none; }
+.xs-body-inner { padding: 0 var(--space-4) var(--space-4); }
+.xs-body-inner > .section-title:first-child { margin-top: 0; }
+
+.xs-subtitle {
+  font-size: var(--text-section);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: var(--weight-bold);
+  color: var(--color-text-tertiary);
+  margin: var(--space-4) 0 var(--space-2);
+}
+.xs-body-inner > .xs-subtitle:first-child { margin-top: 0; }
+
+.xs-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 7px 0;
+  font-size: var(--text-body);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-divider);
+}
+.xs-row:last-child { border-bottom: none; }
+.xs-row b { color: var(--color-text-primary); font-weight: var(--weight-semibold); }
+
+.xs-groups { display: flex; flex-direction: column; }
+.xs-group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--text-body);
+}
+.xs-group:last-child { border-bottom: none; }
+.xs-group-name { flex: 1; min-width: 0; font-weight: var(--weight-semibold); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xs-group-count { color: var(--color-text-tertiary); font-size: var(--text-label); flex-shrink: 0; }
+.xs-group-value { color: var(--color-accent); font-weight: var(--weight-semibold); flex-shrink: 0; }
+
+/* Inside a section the shared builders' own headings/cards step down a
+   level so they don't compete with the section header above them. */
+.xs-body-inner .section-title { margin: var(--space-4) 0 var(--space-2); }
+.xs-body-inner .card { background: var(--color-surface-2); }
+.xs-body-inner .spotlight { background: var(--color-surface-2); }
+
 .back-to-recap {
   color: var(--color-text-secondary);
   background: none;
