@@ -208,7 +208,10 @@ export function firstLastCompactHtml(firstLast, fStrike, lStrike) {
 // Weather, session duration, and fatigue/discomfort folded into ONE quiet
 // card — Conditions is supporting context, never a headline, so it never
 // gets its own stack of separate accordions the way Performance does.
-export function conditionsGroupHtml(session, timing, weatherInnerHtml) {
+// `heading` defaults to true so History Detail's existing layout is
+// unchanged; Explore Session passes false because its accordion header
+// already says "Conditions" directly above this.
+export function conditionsGroupHtml(session, timing, weatherInnerHtml, { heading = true } = {}) {
   const fatigueRows = [
     session.fatigue_rating != null ? kv('Fatigue', `${session.fatigue_rating}/5 &mdash; ${FATIGUE_LABELS[session.fatigue_rating]}`) : '',
     session.hand_discomfort_rating != null ? kv('Hand discomfort', `${session.hand_discomfort_rating}/5 &mdash; ${DISCOMFORT_LABELS[session.hand_discomfort_rating]}`) : '',
@@ -216,7 +219,7 @@ export function conditionsGroupHtml(session, timing, weatherInnerHtml) {
   ].join('');
   const durationRow = timing.totalDurationSeconds != null ? kv('Duration', fmtDuration(timing.totalDurationSeconds)) : '';
   return `
-    <div class="section-title">Conditions</div>
+    ${heading ? '<div class="section-title">Conditions</div>' : ''}
     <div class="card conditions-card">
       ${weatherInnerHtml}
       ${durationRow}
@@ -524,6 +527,199 @@ export function bindShotTimeline(root, shots) {
     cell.addEventListener('click', () => {
       const shot = byId.get(cell.dataset.shotId);
       if (shot) openShotDetailSheet(shot);
+    });
+  });
+}
+
+// ---------- Explore Session (Layer 2) ----------
+// Four collapsible sections — Performance / Session Flow / Practice /
+// Conditions — replacing the old single long scroll. Everything here is
+// composition and selection only: every number still comes from the same
+// stats.js calculators the previous layout used, and the section bodies
+// reuse the same builders History Detail renders, so the two screens can't
+// drift apart numerically.
+//
+// Availability is decided by the CALLER (see summary.js) rather than inside
+// the shared builders, so a section that has nothing to say is simply
+// omitted instead of rendering a "not enough shots yet" placeholder — and
+// History Detail's use of those same builders is left untouched.
+
+const EXPLORE_ICONS = {
+  performance: '<circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.4"/><path d="M12 1.8v3.2M12 19v3.2M1.8 12h3.2M19 12h3.2"/>',
+  flow: '<path d="M4 16l6-6 4 4 7-8"/><path d="M14 6h7v7"/>',
+  practice: '<path d="M6 21V4"/><path d="M6 4.5h11l-2.5 3.5L17 11.5H6"/>',
+  conditions: '<path d="M7.5 17.5a4 4 0 0 1-.4-7.97 5 5 0 0 1 9.6-1.9 4.3 4.3 0 0 1-.2 9.87h-9Z"/>',
+};
+
+function exploreIcon(key) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${EXPLORE_ICONS[key] || EXPLORE_ICONS.performance}</svg>`;
+}
+
+// One accordion section. `body` is pre-rendered HTML; a section whose body
+// is empty is never emitted at all by the caller, so there's no "expands to
+// nothing" state to guard against here.
+export function exploreSectionHtml({ id, index, icon, title, summary, body }) {
+  return `
+    <section class="xs-section" data-xs-section>
+      <button class="xs-head" type="button" aria-expanded="false" aria-controls="${id}">
+        <span class="xs-icon">${exploreIcon(icon)}</span>
+        <span class="xs-head-text">
+          <span class="xs-title">${index ? `${index}. ` : ''}${escapeHtml(title)}</span>
+          <span class="xs-summary">${escapeHtml(summary)}</span>
+        </span>
+        <span class="xs-chevron" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+      </button>
+      <div class="xs-body" id="${id}" hidden>
+        <div class="xs-body-inner">${body}</div>
+      </div>
+    </section>`;
+}
+
+// A compact label/value line — the Explore equivalent of a card, used for
+// everything that would otherwise become its own bordered box.
+export function xsRowHtml(label, value) {
+  return `<div class="xs-row"><span>${escapeHtml(label)}</span><b>${value}</b></div>`;
+}
+
+export function xsSubTitleHtml(text) {
+  return `<div class="xs-subtitle">${escapeHtml(text)}</div>`;
+}
+
+// Group breakdown (club / drill / training aid) rendered as compact lines
+// rather than one card per group. Purely factual — a count and the same
+// solid% used everywhere else, never a causal claim about the grouping.
+export function xsGroupBreakdownHtml(rows) {
+  if (!rows || !rows.length) return '';
+  return `<div class="xs-groups">${rows.map((r) => `
+    <div class="xs-group">
+      <span class="xs-group-name">${escapeHtml(r.name)}</span>
+      <span class="xs-group-count">${r.count} shot${r.count === 1 ? '' : 's'}</span>
+      <span class="xs-group-value">${r.solidPct}% solid</span>
+    </div>`).join('')}</div>`;
+}
+
+// ---------- Collapsed summary lines ----------
+// Each returns the one short orientation line shown while a section is
+// closed. Values are already computed; these only choose which of them to
+// show and drop the parts that don't apply to this session.
+
+function joinDots(parts) {
+  return parts.filter(Boolean).join(' · ');
+}
+
+// Rounded to whole percent for the one-line summary — the same rounding the
+// recap hero uses, and it keeps the three values on one line at phone width
+// (76.7%/83.3% overflowed and truncated). The precise values are still shown
+// in full inside the expanded Contact/Direction breakdowns.
+export function performanceSummaryLine(s) {
+  return joinDots([
+    `${Math.round(s.strike.solid.pct)}% Solid`,
+    `${Math.round(s.direction.straight.pct)}% Straight`,
+    s.distance.medianSolid != null ? `${s.distance.medianSolid} yd Median` : null,
+  ]);
+}
+
+// Picks the single most notable real pattern, in priority order, and falls
+// back to a plain factual count rather than inventing a story when the
+// session genuinely doesn't have one.
+export function sessionFlowSummaryLine(s, fStrike, lStrike) {
+  if (!s.firstLast.overlapping && s.firstLast.first10.length && s.firstLast.last10.length) {
+    const diff = lStrike.solid.pct - fStrike.solid.pct;
+    if (diff >= 10) return `Finished stronger · ${Math.round(lStrike.solid.pct)}% Solid in last 10`;
+    if (diff <= -10) return `Faded late · ${Math.round(lStrike.solid.pct)}% Solid in last 10`;
+  }
+  if (s.bestWindow) return `Best stretch · Balls ${s.bestWindow.startBall}–${s.bestWindow.endBall}`;
+  if (s.streaks.cleanContact.length >= 3) return `${s.streaks.cleanContact.length}-shot clean-contact streak`;
+  if (s.streaks.solid.length >= 2) return `${s.streaks.solid.length}-shot solid streak`;
+  return `${s.strike.solid.count} of ${s.total} solid`;
+}
+
+// Club / drill / training aid — each omitted when it has nothing to add, so
+// an inactive Target or a session with no aid never prints "Off"/"None".
+export function practiceSummaryLine(s, shots, session, trainingAidLabels) {
+  const clubs = clubSummaryLabel(shots, session.default_club);
+  const drills = s.drills.map((d) => d.drill);
+  const drillLabel = drills.length === 1 ? drills[0] : drills.length > 1 ? 'Mixed drills' : null;
+  const aids = s.trainingAids.filter((a) => a.training_aid !== 'none');
+  const aidLabel = aids.length === 1 ? trainingAidLabels[aids[0].training_aid] : aids.length > 1 ? 'Multiple aids' : null;
+  return joinDots([clubs, drillLabel, aidLabel]) || `${s.total} shot${s.total === 1 ? '' : 's'}`;
+}
+
+export function conditionsSummaryLine(session, locationPrimary) {
+  return joinDots([
+    locationPrimary,
+    session.temperature_f != null ? `${session.temperature_f}°F` : null,
+    session.fatigue_rating != null ? `Fatigue ${session.fatigue_rating}/5` : null,
+  ]) || 'No conditions recorded';
+}
+
+// Wires the accordion: one section open at a time, all closed initially.
+// Height is measured rather than guessed so the transition lands exactly on
+// the content's real size; under prefers-reduced-motion the panels just
+// toggle with no animation at all.
+export function bindExploreAccordion(root) {
+  const reduced = typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+
+  const sections = qsa('[data-xs-section]', root);
+
+  // Runs `after` once the height transition finishes, with a timer fallback:
+  // if the transition never actually starts (a zero-height change, or the
+  // element having no previous computed height to animate from),
+  // transitionend never fires and the panel would otherwise be left pinned
+  // at a fixed inline height — which then clips it if its content grows
+  // later, e.g. when the nested "More distance stats" toggle is opened.
+  const TRANSITION_MS = 240;
+  const onSettled = (body, after) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      body.removeEventListener('transitionend', onEnd);
+      after();
+    };
+    const onEnd = (e) => { if (e.target === body && e.propertyName === 'height') finish(); };
+    body.addEventListener('transitionend', onEnd);
+    setTimeout(finish, TRANSITION_MS + 60);
+  };
+
+  const close = (section, animate) => {
+    const head = qs('.xs-head', section);
+    const body = qs('.xs-body', section);
+    if (head.getAttribute('aria-expanded') !== 'true') return;
+    head.setAttribute('aria-expanded', 'false');
+    section.classList.remove('open');
+    if (!animate) { body.hidden = true; body.style.height = ''; return; }
+    body.style.height = `${body.scrollHeight}px`;
+    void body.offsetHeight; // flush the starting height so the transition has something to animate from
+    body.style.height = '0px';
+    onSettled(body, () => { body.hidden = true; body.style.height = ''; });
+  };
+
+  const open = (section, animate) => {
+    const head = qs('.xs-head', section);
+    const body = qs('.xs-body', section);
+    head.setAttribute('aria-expanded', 'true');
+    section.classList.add('open');
+    body.hidden = false;
+    if (!animate) { body.style.height = ''; return; }
+    body.style.height = '0px';
+    void body.offsetHeight;
+    body.style.height = `${body.scrollHeight}px`;
+    // Cleared once settled so the panel goes back to auto height and can
+    // grow with its own content afterwards.
+    onSettled(body, () => { body.style.height = ''; });
+  };
+
+  sections.forEach((section) => {
+    qs('.xs-head', section).addEventListener('click', () => {
+      const isOpen = qs('.xs-head', section).getAttribute('aria-expanded') === 'true';
+      sections.forEach((other) => { if (other !== section) close(other, !reduced); });
+      if (isOpen) close(section, !reduced);
+      else open(section, !reduced);
     });
   });
 }
