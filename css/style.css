@@ -256,6 +256,8 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
               opacity var(--duration-fast) var(--ease-standard);
 }
 .btn:active { transform: scale(0.97); opacity: 0.9; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:disabled:active { transform: none; }
 
 .btn-primary {
   background: var(--color-accent);
@@ -570,7 +572,10 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 .home-screen .btn-log-shot { margin-top: var(--space-4); flex-shrink: 0; }
 
 /* ---------- Home: in-progress session card ---------- */
-.home-active-card { margin-top: var(--space-4); flex-shrink: 0; }
+/* docs/ux-spec.md §3.12: warning-soft fill + a warning accent edge — this
+   is Home's "what do I do next" answer whenever a session is paused/in
+   progress, so it's the brightest element on the screen while it's shown. */
+.home-active-card { margin-top: var(--space-4); flex-shrink: 0; background: var(--color-warning-soft); border-left: 3px solid var(--color-warning); }
 .home-active-header { display: flex; align-items: center; gap: var(--space-3); }
 .home-active-icon {
   width: 44px;
@@ -580,7 +585,7 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--color-warning-soft);
+  background: var(--color-surface);
   color: var(--color-warning);
 }
 .home-active-icon svg { width: 20px; height: 20px; }
@@ -617,34 +622,10 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 .home-active-card .hairline { margin: var(--space-4) 0; }
 .home-active-card .btn-hero { margin-top: 0; }
 
-.home-active-or {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-3) 0;
-  color: var(--color-text-tertiary);
-  font-size: var(--text-label);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.home-active-or::before, .home-active-or::after { content: ''; flex: 1; height: 1px; background: var(--color-divider); }
-
-.home-active-end {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: var(--tap-min);
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--color-danger);
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-body);
-}
-.home-active-end:active { opacity: 0.7; }
-.home-active-end svg { width: 17px; height: 17px; }
+/* End Session is a tertiary text action here (§3.12: "the banner is amber,
+   the action is not") — .tertiary-link supplies the color/type, this just
+   centers it full-width under the primary Resume button. */
+.home-active-end { display: block; text-align: center; }
 .home-active-end-note {
   text-align: center;
   color: var(--color-text-tertiary);
@@ -1193,6 +1174,7 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: var(--space-2);
   padding: var(--space-3) 2px;
   border-bottom: 1px solid var(--color-divider);
   font-size: var(--text-body);
@@ -1205,6 +1187,83 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 .shot-row .tag-aid,
 .shot-row .tag-setup,
 .shot-row .tag-target { color: var(--color-accent); background: var(--color-accent-soft); cursor: pointer; }
+
+/* Batch edit (docs/ux-spec.md §3.10). The checkbox gutter is ALWAYS present
+   in the markup (never inserted only on entering selection mode) so row
+   content never shifts horizontally when selection mode turns on — only
+   the ring's opacity changes. Selected uses an inset box-shadow rather than
+   a border so toggling selection never changes the row's box model either. */
+.shot-row-check { width: 26px; height: 26px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.shot-row-check svg { width: 20px; height: 20px; }
+.shot-row-check .check-ring { fill: none; stroke: var(--color-text-tertiary); stroke-width: 1.6; opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
+.shot-row-check .check-fill { fill: var(--color-accent); opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
+.shot-row-check .check-mark { stroke: var(--color-accent-contrast); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; fill: none; opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
+.shots-list.selecting .shot-row-check .check-ring { opacity: 1; }
+.shot-row.selected .shot-row-check .check-fill,
+.shot-row.selected .shot-row-check .check-mark { opacity: 1; }
+.shot-row.selected { background: var(--color-accent-soft); box-shadow: inset 3px 0 0 var(--color-accent); border-radius: var(--radius-sm); }
+
+/* Selection-controls row: a two-way view filter (All / Selected (n)) plus a
+   small, deliberately secondary Delete — the footer below is reserved for
+   exactly count + note + Cancel + the primary Edit CTA, so Delete lives
+   here instead of competing with that. */
+.batch-select-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.batch-select-controls[hidden] { display: none; }
+.batch-filter-tab {
+  min-height: 34px;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-full);
+  border: none;
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.batch-filter-tab.active { background: var(--color-accent-soft); color: var(--color-accent); font-weight: var(--weight-semibold); }
+.batch-delete-link {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  cursor: pointer;
+}
+
+/* Footer per docs/ux-spec.md's Edit Shots screen: a live count + a one-line
+   reassurance that only changed fields are touched, then Cancel and the
+   primary Edit CTA (its own label carries the count — "Edit 4 Shots" — so
+   the button never needs a separate disabled/enabled explanation). */
+.batch-action-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-floating);
+  padding: var(--space-3) var(--space-4) calc(var(--safe-bottom) + var(--space-3));
+}
+.batch-footer-count { font-size: var(--text-body); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
+.batch-footer-note { font-size: var(--text-caption); color: var(--color-text-secondary); margin-top: 2px; }
+.batch-footer-buttons { display: flex; gap: var(--space-3); }
+.batch-footer-buttons .btn { flex: 1; }
+
+/* The one place a red fill covers a whole surface (§3.10) — reserved for
+   the batch-delete confirmation only; every other destructive control in
+   the app stays an outline/text treatment until this exact moment. */
+.sheet.sheet-danger { background: var(--color-danger-soft); }
 
 /* ---------- Shot map ---------- */
 /* Adapts to session length (see shotTimelineHtml in summarySections.js):
@@ -1501,6 +1560,11 @@ textarea { min-height: 76px; resize: vertical; }
   display: flex;
   align-items: center;
 }
+/* An author display:flex normally beats the UA [hidden] default even at
+   equal specificity (author stylesheets win ties over user-agent ones) —
+   Edit Shots toggles #enterSelectBtn's hidden attribute at runtime, so this
+   is needed for that toggle to actually hide it. */
+.topbar .back[hidden] { display: none; }
 
 /* ---------- Explore Session accordion ---------- */
 /* Four collapsible sections, all closed on open, one open at a time. The
@@ -1985,13 +2049,19 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 .insight-headline { font-size: var(--text-label); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-accent); margin-bottom: 2px; }
 .insight-sub { font-size: var(--text-body); color: var(--color-text-primary); }
 
-/* Next Goal — same dark-card shell as .insight-card (via next-goal-card
-   sharing that class), but its own 3-line stack: a small green eyebrow
-   label above the goal itself, which is what should draw the eye. */
+/* Next Goal — docs/ux-spec.md §2.1/§4.5: amber/warning, not accent green
+   (Next Goal and paused-session are the two named uses of --color-warning).
+   Shares .insight-card's shell, with the surface itself tinted warning-soft
+   and the icon circle flipped to a plain surface so it still reads against
+   that tint, same pattern as Home's paused-session card. */
+.next-goal-card { background: var(--color-warning-soft); }
+.next-goal-card .insight-icon { background: var(--color-surface); color: var(--color-warning); }
 .next-goal-text { flex: 1; min-width: 0; }
-.next-goal-eyebrow { font-size: var(--text-label); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-accent); margin-bottom: 2px; }
+.next-goal-eyebrow { font-size: var(--text-label); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-warning); margin-bottom: 2px; }
 .next-goal-title { font-size: var(--text-body-lg); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
 .next-goal-detail { font-size: var(--text-caption); color: var(--color-text-secondary); margin-top: 2px; }
+.goal-eval-actions { margin-top: var(--space-3); }
+.goal-eval-actions .tertiary-link { padding: 0; justify-content: center; display: flex; }
 
 /* Recap's entry point into the full detailed analytics — a secondary
    surface row (not a bright primary CTA) so Done stays the obvious primary
@@ -2019,6 +2089,49 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 .explore-row-title { font-size: var(--text-body-lg); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
 .explore-row-sub { font-size: var(--text-caption); color: var(--color-text-secondary); margin-top: 2px; }
 .explore-row-chevron { color: var(--color-accent); font-size: 1.4em; line-height: 1; flex-shrink: 0; }
+
+/* ---------- Your Groove ---------- */
+
+.groove-building-card { text-align: center; margin: var(--space-4) 0; }
+.groove-building-title { font-size: var(--text-heading); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
+.groove-building-sub { font-size: var(--text-label); color: var(--color-text-secondary); margin-top: var(--space-1); }
+
+/* Shared comparison pill — Session Summary's Solid Contact hero and Your
+   Groove's Groove Score hero both use this (see comparisonPillHtml() in
+   summarySections.js for why it doesn't reuse .metric-delta, which colors
+   a decline red; this spec explicitly forbids that for a top-level pill). */
+.comparison-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: var(--space-2) auto var(--space-5);
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  width: fit-content;
+}
+.comparison-pill-up { background: var(--color-accent-soft); color: var(--color-accent); }
+.comparison-pill-flat { background: var(--color-surface-2); color: var(--color-text-secondary); }
+
+.groove-trend-card { background: var(--color-surface); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: var(--space-5); }
+.groove-trend-chart { width: 100%; height: 100px; display: block; }
+.groove-trend-baseline { stroke: var(--color-divider); stroke-width: 1; }
+
+/* Tertiary action per §3.9: text-only, secondary color — used for Your
+   Groove's "Back to Session Summary" link, distinct from the topbar's
+   primary back arrow. */
+.tertiary-link {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  cursor: pointer;
+}
+.tertiary-link:active { opacity: 0.7; }
 
 /* ---------- Session Setup ---------- */
 

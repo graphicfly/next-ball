@@ -6,12 +6,13 @@ import { downloadSessionCSV } from '../export.js';
 const ICON_DOTS = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
 
 // A brief, real Undo window after a History delete — holds the exact
-// {session, shots} deleteSession() returned so restoreSession() can put
-// them back verbatim if tapped in time. Module-scope (not a closure inside
-// renderHistory) so it survives the re-render a delete triggers; cleared
-// whenever a new delete happens (single-slot, not a stack) or the window
-// lapses. See db.js's deleteSession/restoreSession for the persistence side.
-let pendingUndo = null; // { session, shots }
+// {session, shots, goal} deleteSession() returned so restoreSession() can
+// put them back verbatim if tapped in time. Module-scope (not a closure
+// inside renderHistory) so it survives the re-render a delete triggers;
+// cleared whenever a new delete happens (single-slot, not a stack) or the
+// window lapses. See db.js's deleteSession/restoreSession for the
+// persistence side.
+let pendingUndo = null; // { session, shots, goal }
 let pendingUndoTimer = null;
 
 function clearPendingUndo() {
@@ -97,9 +98,9 @@ export function renderHistory(root) {
 
   qs('#undoDeleteBtn', root)?.addEventListener('click', () => {
     if (!pendingUndo) return;
-    const { session, shots } = pendingUndo;
+    const { session, shots, goal } = pendingUndo;
     clearPendingUndo();
-    const restored = db.restoreSession(session, shots);
+    const restored = db.restoreSession(session, shots, goal);
     if (!restored) toast('Could not undo — please check History');
     renderHistory(root);
   });
@@ -194,7 +195,7 @@ export function openDeleteConfirmSheet(session, root, onDeleted) {
     }
     close();
     clearPendingUndo();
-    pendingUndo = { session: result.session, shots: result.shots };
+    pendingUndo = { session: result.session, shots: result.shots, goal: result.goal };
     pendingUndoTimer = setTimeout(() => {
       // Guard against clobbering whatever screen is showing by the time this
       // fires — root is the single shared #app element reused by every

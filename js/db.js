@@ -204,6 +204,7 @@ function defaultIndex() {
   return {
     schemaVersion: 2,
     sessions: [],
+    goals: [],
     settings: { lastClub: null, lastSetup: 'ground', lastSurface: 'mat', lastSwing: 'full', lastBallCount: DEFAULT_BALL_COUNT, lastKnownLocation: null, theme: 'dark' },
   };
 }
@@ -214,6 +215,10 @@ function loadIndex() {
     const raw = localStorage.getItem(INDEX_KEY);
     _index = raw ? JSON.parse(raw) : defaultIndex();
     if (!Array.isArray(_index.sessions)) _index.sessions = [];
+    // Older saved indexes (pre-goal-persistence) simply lack this key —
+    // same normalize-on-load pattern as `sessions` above, so every caller
+    // downstream can assume the array always exists.
+    if (!Array.isArray(_index.goals)) _index.goals = [];
     if (!_index.settings || typeof _index.settings !== 'object') _index.settings = {};
   } catch (e) {
     console.error('Next Ball: failed to load local data, starting fresh', e);
@@ -282,7 +287,7 @@ export function getDB() {
   const index = loadIndex();
   const shots = [];
   for (const s of index.sessions) shots.push(...loadShotsChunk(s.session_id));
-  return { schemaVersion: index.schemaVersion, sessions: index.sessions, shots, settings: index.settings };
+  return { schemaVersion: index.schemaVersion, sessions: index.sessions, shots, goals: index.goals, settings: index.settings };
 }
 
 // ---------- Sessions ----------
@@ -512,6 +517,140 @@ export function finishSession(sessionId) {
   return updateSession(sessionId, { status: 'finished', end_time: new Date().toTimeString().slice(0, 5) });
 }
 
+// ---------- Next Goal persistence ----------
+// A goal is the structured object sessionStory.js's getNextGoal() computes
+// at the end of a session — title/detail/metric/target/current/shotsAway/
+// context — wrapped here with its own identity, source session, and
+// lifecycle status. Storage-only: this module never calls getNextGoal()
+// itself or decides WHEN a goal is created/resolved — see
+// sessionAnalysis.js's finalizeSessionGoal, the single call site for that,
+// triggered once per session at the moment it finishes. Kept in the index
+// (not its own chunked key) since goals are small and bounded by session
+// count, exactly like `sessions` itself.
+//
+// 'met' / 'partially_met' / 'not_met' are real evaluation outcomes, not
+// implemented yet (no code path assigns them) — the enum exists now so a
+// future evaluation feature doesn't need a migration to add a status value.
+export const GOAL_STATUSES = ['active', 'met', 'partially_met', 'not_met', 'superseded'];
+
+function loadGoals() {
+  return loadIndex().goals;
+}
+
+export function getGoals() {
+  return loadGoals();
+}
+
+// At most one goal is ever 'active' at a time (see createGoal, which always
+// supersedes whatever was active before adding a new one) — .find() rather
+// than a dedicated pointer field keeps that invariant self-evident from the
+// data itself instead of a second source of truth that could drift from it.
+export function getActiveGoal() {
+  return loadGoals().find((g) => g.status === 'active') || null;
+}
+
+// The goal a specific session produced (if any) — a past session's Session
+// Summary reads this to show exactly what it generated, regardless of that
+// goal's current lifecycle status.
+export function getGoalForSession(sessionId) {
+  return loadGoals().find((g) => g.session_id === sessionId) || null;
+}
+
+// Creates a new 'active' goal from the structured object getNextGoal()
+// returns. Does NOT itself resolve whatever was previously active — see
+// finalizeSessionGoal, which calls resolveGoal() first so there is never a
+// moment with two simultaneously-active goals.
+export function createGoal(sessionId, goal) {
+  const goals = loadGoals();
+  const ts = nowISO();
+  const record = {
+    goal_id: uuid(),
+    session_id: sessionId,
+    created_at: ts,
+    resolved_at: null,
+    status: 'active',
+    superseded_by: null,
+    // Filled in later by recordGoalEvaluationAttempt/resolveGoal once (if
+    // ever) a later session provides enough comparable data to check this
+    // goal — see sessionStory.js's evaluateGoal for the shape.
+    evaluation: null,
+    ...goal,
+  };
+  goals.push(record);
+  saveIndex();
+  return record;
+}
+
+// Moves a goal out of 'active' into a terminal (or superseding) status.
+// `supersededBy` records the replacement goal's id when status is
+// 'superseded', so the chain from one goal to the next is traceable without
+// a separate history table. `evaluation` (see evaluateGoal's return shape)
+// is attached at the same time for a conclusive (met/partially_met/
+// not_met) result — the one write that both resolves the goal and records
+// why.
+export function resolveGoal(goalId, status, { supersededBy = null, evaluation = null } = {}) {
+  const goals = loadGoals();
+  const g = goals.find((x) => x.goal_id === goalId);
+  if (!g) return null;
+  g.status = status;
+  g.resolved_at = nowISO();
+  if (supersededBy) g.superseded_by = supersededBy;
+  if (evaluation) g.evaluation = evaluation;
+  saveIndex();
+  return g;
+}
+
+// Records an EVALUATION ATTEMPT that did not produce enough comparable data
+// to actually resolve the goal — the goal's status is deliberately left
+// untouched (still 'active'). Distinct from resolveGoal(): this never
+// changes status/resolved_at, only leaves a trail of "a later session
+// checked this and here's why it couldn't tell yet," so Session Summary can
+// explain the "still active" state instead of showing nothing.
+export function recordGoalEvaluationAttempt(goalId, evaluation) {
+  const goals = loadGoals();
+  const g = goals.find((x) => x.goal_id === goalId);
+  if (!g) return null;
+  g.evaluation = evaluation;
+  saveIndex();
+  return g;
+}
+
+// Puts a resolved goal back into 'active' status — the "Continue This
+// Goal" action after an evaluation. Guards the single-active-goal
+// invariant exactly like restoreSession's own reactivation path: if a
+// different goal is somehow already active, it's superseded first rather
+// than allowing two simultaneously-active goals.
+export function reactivateGoal(goalId) {
+  const goals = loadGoals();
+  const g = goals.find((x) => x.goal_id === goalId);
+  if (!g) return null;
+  const currentActive = getActiveGoal();
+  if (currentActive && currentActive.goal_id !== goalId) {
+    currentActive.status = 'superseded';
+    currentActive.resolved_at = nowISO();
+    currentActive.superseded_by = goalId;
+  }
+  g.status = 'active';
+  g.resolved_at = null;
+  g.superseded_by = null;
+  saveIndex();
+  return g;
+}
+
+// Marks an already-resolved goal's evaluation as dismissed — the "Dismiss
+// For Now" action. Purely a UI-acknowledgment flag (see summary.js): it
+// changes nothing about the goal's status, it just tells Session Summary
+// not to keep offering the Continue/Set New Goal/Dismiss choice on repeat
+// visits to this same session's recap.
+export function dismissGoalEvaluation(goalId) {
+  const goals = loadGoals();
+  const g = goals.find((x) => x.goal_id === goalId);
+  if (!g || !g.evaluation) return null;
+  g.evaluation = { ...g.evaluation, dismissed: true };
+  saveIndex();
+  return g;
+}
+
 // Session Check-In — each rating is independently optional; pass null/undefined to leave unset.
 export function setSessionCheckIn(sessionId, { fatigue_rating, hand_discomfort_rating, elbow_discomfort_rating }) {
   return updateSession(sessionId, {
@@ -587,10 +726,18 @@ export function deleteSession(sessionId) {
   }
 
   const shots = getShotsForSession(sessionId); // snapshot before removal, for the caller's undo/records
+  // A goal this session produced has no meaning once its source session is
+  // gone — removed alongside it (and restored alongside it on Undo, see
+  // restoreSession) rather than left as an orphaned reference to a
+  // session_id that no longer exists.
+  const goalIdx = index.goals.findIndex((g) => g.session_id === sessionId);
+  const removedGoal = goalIdx !== -1 ? index.goals[goalIdx] : null;
 
   index.sessions.splice(idx, 1);
+  if (removedGoal) index.goals.splice(goalIdx, 1);
   if (!saveIndex()) {
     index.sessions.splice(idx, 0, removedSession); // roll back the in-memory removal — nothing was actually persisted
+    if (removedGoal) index.goals.splice(goalIdx, 0, removedGoal);
     throw Object.assign(new Error('Failed to delete session'), { code: 'storage_error' });
   }
 
@@ -601,7 +748,7 @@ export function deleteSession(sessionId) {
   }
   _shotsCache.delete(sessionId);
 
-  return { session: removedSession, shots };
+  return { session: removedSession, shots, goal: removedGoal };
 }
 
 // Re-inserts a session and its shots exactly as returned by deleteSession(),
@@ -609,8 +756,10 @@ export function deleteSession(sessionId) {
 // session" API — trusts the caller to pass back exactly what was removed.
 // Returns false (without throwing) if a session with that id already exists
 // again (nothing to do) or if the write fails, so the caller can show a
-// simple "Couldn't undo" message rather than crash.
-export function restoreSession(session, shots) {
+// simple "Couldn't undo" message rather than crash. `goal` is optional
+// (deleteSession's result may carry null) so every existing 2-arg caller
+// keeps working unchanged.
+export function restoreSession(session, shots, goal = null) {
   const index = loadIndex();
   if (index.sessions.some((s) => s.session_id === session.session_id)) return false;
 
@@ -622,6 +771,23 @@ export function restoreSession(session, shots) {
 
   _shotsCache.set(session.session_id, shots);
   saveShotsChunk(session.session_id);
+
+  if (goal && !index.goals.some((g) => g.goal_id === goal.goal_id)) {
+    // Guards the single-active-goal invariant: if a different session
+    // finished (and created its own active goal) during the delete/undo
+    // window, the restored goal rejoins history as superseded rather than
+    // creating a second simultaneously-active goal.
+    const restored = { ...goal };
+    const currentActive = getActiveGoal();
+    if (restored.status === 'active' && currentActive && currentActive.goal_id !== restored.goal_id) {
+      restored.status = 'superseded';
+      restored.resolved_at = nowISO();
+      restored.superseded_by = currentActive.goal_id;
+    }
+    index.goals.push(restored);
+    saveIndex();
+  }
+
   return true;
 }
 
@@ -693,6 +859,48 @@ export function updateShot(sessionId, shotId, patch) {
   return sh;
 }
 
+// Applies the same patch to every shot in shotIds within one session, in a
+// single save — used by History Detail's batch-edit action bar (see
+// docs/ux-spec.md §3.10). Deliberately a single write rather than N calls to
+// updateShot(), since a batch operation is exactly the "many shots, one
+// change" case that chunked storage exists to make cheap. shot_number and
+// shot_timestamp are never among the patched fields (the caller only ever
+// passes one of the seven context fields), so history stays otherwise
+// untouched. Returns how many shots actually matched.
+export function updateShots(sessionId, shotIds, patch) {
+  const idSet = new Set(shotIds);
+  const shots = loadShotsChunk(sessionId);
+  const ts = nowISO();
+  let count = 0;
+  for (const sh of shots) {
+    if (idSet.has(sh.shot_id)) {
+      Object.assign(sh, patch, { updated_at: ts });
+      count++;
+    }
+  }
+  saveShotsChunk(sessionId);
+  return count;
+}
+
+// Permanently removes a set of shots from a session, keyed by shot_id.
+// Unlike deleteLastShot (which only ever removes the highest shot_number),
+// this can remove shots from anywhere in the list — batch delete's whole
+// point. Deliberately does NOT renumber the shots that remain: shot_number
+// is an immutable historical fact (see the shot-context-snapshot tests), so
+// a deletion here simply leaves a gap, exactly like an undone/edited shot
+// already can. Every stats.js calculator sorts by shot_number and walks it
+// positionally, so a gap changes nothing about correctness. Returns how
+// many shots were actually removed.
+export function deleteShots(sessionId, shotIds) {
+  const idSet = new Set(shotIds);
+  const shots = loadShotsChunk(sessionId);
+  const remaining = shots.filter((s) => !idSet.has(s.shot_id));
+  const removedCount = shots.length - remaining.length;
+  _shotsCache.set(sessionId, remaining);
+  saveShotsChunk(sessionId);
+  return removedCount;
+}
+
 export function deleteLastShot(sessionId) {
   const shotsForSession = loadShotsChunk(sessionId);
   if (shotsForSession.length === 0) return null;
@@ -758,6 +966,9 @@ export function importFullDB(obj) {
   _index = {
     schemaVersion: obj.schemaVersion || 1,
     sessions: obj.sessions,
+    // Older backups (pre-goal-persistence) simply have no `goals` key —
+    // that's not a corrupt file, just data from before this existed.
+    goals: Array.isArray(obj.goals) ? obj.goals : [],
     settings: obj.settings || defaultIndex().settings,
   };
   _shotsCache.clear();

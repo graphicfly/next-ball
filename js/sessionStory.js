@@ -7,7 +7,7 @@
 
 import { STRIKE, TRAINING_AID_LABELS } from './db.js';
 import { cap } from './ui.js';
-import { strikeBreakdown } from './stats.js';
+import { strikeBreakdown, directionBreakdown, streaksSummary, cleanContactStreak } from './stats.js';
 
 function isFiniteNumber(v) {
   return typeof v === 'number' && Number.isFinite(v);
@@ -32,6 +32,13 @@ function pts(n) {
 // would always be retelling the same fact a second time, never new
 // information. If that dedicated section is ever made conditional, this
 // tier could be reconsidered, but not before.
+//
+// Same reasoning removed the old "Clean Contact Streak" tier (>= 6):
+// Session Summary now has its own dedicated, unconditional Clean Contact
+// Streak card (see stats.js's cleanContactStreak(), a stricter predicate
+// than streaks.cleanContact below), so this insight would always duplicate
+// it. The looser solid-streak tier stays — it's a different metric
+// (streaks.solid) with no dedicated section of its own.
 
 // Percentage-point comparisons get noisy fast on small samples (one shot
 // swings a 3-shot session by ~33 points) — the same 10-shot floor the app
@@ -159,9 +166,6 @@ export function buildRecapInsight(s, comparison, personalBests, session, shots) 
     }
   }
 
-  if (s.streaks.cleanContact.length >= 6) {
-    return { headline: 'Clean Contact Streak', sub: `${s.streaks.cleanContact.length} shots in a row without a top or fat` };
-  }
   if (s.streaks.solid.length >= 4) {
     return { headline: 'Solid Streak', sub: `${s.streaks.solid.length} shots in a row` };
   }
@@ -263,6 +267,7 @@ export function solidContactGoal(s, total) {
     title: `${next}% Solid Contact`,
     detail: `You were ${shotsAway} shot${shotsAway === 1 ? '' : 's'} away in a ${total}-ball session.`,
     metric: 'solid_percentage',
+    comparisonOperator: 'gte',
     target: next,
     current: round1(pctExact),
     shotsAway,
@@ -282,6 +287,7 @@ export function topFatGoal(s, total) {
     title: `Top + Fat Under ${next}%`,
     detail: `You had ${topFatCount} Top/Fat shot${topFatCount === 1 ? '' : 's'} today. ${maxAllowed} or fewer gets you under ${next}%.`,
     metric: 'top_fat_percentage',
+    comparisonOperator: 'lt',
     target: next,
     current: round1(pctExact),
     shotsAway,
@@ -303,6 +309,7 @@ export function straightGoal(s, total) {
     title: `${next}% Straight`,
     detail: `You were ${shotsAway} shot${shotsAway === 1 ? '' : 's'} away in a ${total}-ball session.`,
     metric: 'straight_percentage',
+    comparisonOperator: 'gte',
     target: next,
     current: round1(pctExact),
     shotsAway,
@@ -320,6 +327,30 @@ export function streakGoal(s, total) {
     title: `${next} Solid in a Row`,
     detail: `Your best streak today was ${streak}.`,
     metric: 'solid_streak',
+    comparisonOperator: 'gte',
+    target: next,
+    current: streak,
+  };
+}
+
+// Longest run with no Top, Fat, Shank, or Miss (stats.js's cleanContactStreak
+// — the same stricter definition Session Summary's dedicated Clean Contact
+// Streak card and Groove Score both use). Distinct from the solid-only
+// streakGoal above: a run of Solid/Thin shots counts here even where a Thin
+// shot would have broken a pure-solid streak, so this can produce a goal in
+// cases streakGoal alone would miss.
+export function cleanContactStreakGoal(s, total) {
+  if (total < MIN_SHOTS_FOR_STREAK_GOAL) return null;
+  const streak = s.cleanContactStreak.length;
+  if (streak < MIN_STREAK_FOR_GOAL) return null;
+  const next = STREAK_MILESTONES.find((m) => m > streak);
+  if (next === undefined) return null;
+  return {
+    type: 'clean_contact_streak',
+    title: `${next}-Shot Clean-Contact Streak`,
+    detail: `Your best clean-contact streak today was ${streak}.`,
+    metric: 'clean_contact_streak',
+    comparisonOperator: 'gte',
     target: next,
     current: streak,
   };
@@ -348,9 +379,82 @@ export function targetGoal(s, shots, total) {
     title: `${next}% Within 10 Yards`,
     detail: `${shotsAway} more accurate shot${shotsAway === 1 ? '' : 's'} gets you there.`,
     metric: 'target_within_10yd_percentage',
+    comparisonOperator: 'gte',
     target: next,
     current: round1(pctExact),
     shotsAway,
+    // Which target distance this goal is actually about — without this, a
+    // later evaluation has no way to find "the same practice" shots in a
+    // future session. Not used by anything at generation time; it exists
+    // purely so evaluateGoal() below can locate the right shots later.
+    targetDistance: primary.target,
+  };
+}
+
+// "Out of 10" milestones for the two ratio-based goals below — a different
+// vocabulary from PCT_MILESTONES_UP's percentages, matching how the app
+// already talks about 10-shot stretches elsewhere (Best 10, streak
+// targets), and how the product spec's own examples ("6 of 10", "7 of 10")
+// phrase these two goal types specifically.
+const RATIO_MILESTONES_UP = [5, 6, 7, 8, 9];
+
+// A club-specific solid-contact goal — only ever proposed for the golfer's
+// DOMINANT club this session (the most-hit one), and only once it has a
+// real sample of its own. This is what keeps the goal from ever asking for
+// improvement with a club the golfer barely touched today.
+const MIN_SHOTS_FOR_CLUB_GOAL = 10;
+
+export function clubSolidContactGoal(s) {
+  if (!s.clubs.length) return null;
+  const dominant = [...s.clubs].sort((a, b) => b.count - a.count)[0];
+  if (dominant.count < MIN_SHOTS_FOR_CLUB_GOAL) return null;
+  const currentOutOf10 = Math.floor((dominant.solidPct / 100) * 10);
+  const next = RATIO_MILESTONES_UP.find((m) => m > currentOutOf10);
+  if (next === undefined) return null;
+  return {
+    type: 'club_solid_contact',
+    title: `${next} of 10 ${dominant.club} Solid`,
+    detail: `You hit ${currentOutOf10} of every 10 ${dominant.club} shots solid today.`,
+    metric: 'club_solid_ratio',
+    comparisonOperator: 'gte',
+    target: next,
+    targetDenominator: 10,
+    current: currentOutOf10,
+    club: dominant.club,
+    shotsAway: next - currentOutOf10,
+  };
+}
+
+// A direction-CONSISTENCY goal — whichever of Left/Straight/Right the
+// golfer actually favored this session, not specifically Straight (that's
+// straightGoal above, gated behind a contact-stability floor). This reads
+// "keep doing your natural shot shape more often," useful even for a
+// session where contact isn't stable enough for straightGoal to apply.
+const MIN_SHOTS_FOR_DIRECTION_GOAL = 10;
+
+export function dominantDirectionGoal(s, total) {
+  if (total < MIN_SHOTS_FOR_DIRECTION_GOAL) return null;
+  const dirs = [
+    { key: 'left', count: s.direction.left.count },
+    { key: 'straight', count: s.direction.straight.count },
+    { key: 'right', count: s.direction.right.count },
+  ];
+  const dominant = dirs.reduce((a, b) => (b.count > a.count ? b : a));
+  if (dominant.count === 0) return null;
+  const currentOutOf10 = Math.floor((dominant.count / total) * 10);
+  const next = RATIO_MILESTONES_UP.find((m) => m > currentOutOf10);
+  if (next === undefined) return null;
+  return {
+    type: 'dominant_direction',
+    title: `${next} of 10 Shots ${cap(dominant.key)}`,
+    detail: `You kept ${currentOutOf10} of every 10 shots ${dominant.key} today.`,
+    metric: 'dominant_direction_ratio',
+    comparisonOperator: 'gte',
+    target: next,
+    targetDenominator: 10,
+    current: currentOutOf10,
+    direction: dominant.key,
+    shotsAway: next - currentOutOf10,
   };
 }
 
@@ -393,9 +497,195 @@ export function getNextGoal(s, shots, session) {
     // Ties keep insertion order above (Solid > Top+Fat > Straight).
     goal = candidates.reduce((best, c) => (c.shotsAway < best.shotsAway ? c : best), candidates[0]);
   } else {
-    goal = streakGoal(s, total) || targetGoal(s, shots, total);
+    // None of the three percentage-milestone goals had headroom (or the
+    // session was too short for them) — fall through to narrower goal
+    // types, in order of how specific/actionable they are. streakGoal stays
+    // first so its existing selection behavior is unchanged; the newer
+    // types only ever fire when nothing above them already did.
+    goal = streakGoal(s, total)
+      || cleanContactStreakGoal(s, total)
+      || clubSolidContactGoal(s)
+      || dominantDirectionGoal(s, total)
+      || targetGoal(s, shots, total);
   }
 
   if (!goal) return null;
   return { ...goal, context: goalContext(session) };
+}
+
+// ---------- Next Goal evaluation ----------
+// Checks a previously-persisted goal against a LATER session's shots.
+// Deliberately conservative: a goal is only ever evaluated against shots
+// that are actually relevant to it (same club for a club-scoped goal, same
+// dominant club for every other type, same target distance for a target
+// goal) — a session that doesn't provide enough of that relevant data
+// leaves the goal untouched rather than declaring (or implying) a result.
+//
+// Pure function of (goal, session, shots, s) — no storage, no side effects.
+// The caller (sessionAnalysis.js's finalizeSessionGoal) decides what to
+// persist based on the returned outcome.
+
+export const EVAL_OUTCOMES = ['met', 'almost', 'not_met', 'not_enough_data'];
+
+// How many of the relevant shots are needed before a result means anything
+// — reuses the exact same minimums each goal type required to be CREATED in
+// the first place, so evaluation never holds a goal to a stricter standard
+// than its own generation did.
+const MIN_RELEVANT_SHOTS_BY_TYPE = {
+  solid_contact: MIN_SHOTS_FOR_SOLID_GOAL,
+  top_fat: MIN_SHOTS_FOR_TOPFAT_OR_STRAIGHT_GOAL,
+  straight: MIN_SHOTS_FOR_TOPFAT_OR_STRAIGHT_GOAL,
+  club_solid_contact: MIN_SHOTS_FOR_CLUB_GOAL,
+  dominant_direction: MIN_SHOTS_FOR_DIRECTION_GOAL,
+  target_accuracy: MIN_SHOTS_AT_TARGET_FOR_GOAL,
+};
+
+function minRelevantShotsFor(goal) {
+  // A streak can only ever be as long as the sample it's drawn from — a
+  // 20-shot streak target is structurally impossible to confirm in a
+  // 12-shot session, so that's treated as "not enough data," not "not met."
+  if (goal.type === 'solid_streak' || goal.type === 'clean_contact_streak') {
+    return Math.max(MIN_SHOTS_FOR_STREAK_GOAL, goal.target);
+  }
+  return MIN_RELEVANT_SHOTS_BY_TYPE[goal.type] ?? MIN_SHOTS_FOR_SOLID_GOAL;
+}
+
+// The subset of a later session's shots that actually bear on this goal.
+// club_solid_contact filters directly to the goal's own club. Every other
+// type was originally measured across a WHOLE session, so it's only
+// evaluated against another session whose OWN dominant club matches the
+// one the goal was founded on — this is what keeps an unrelated club (or a
+// session that moved on to a different club entirely) from silently
+// deciding a goal it was never about. target_accuracy narrows further to
+// shots at the exact target distance the goal recorded.
+function relevantShotsForGoal(goal, shots, s) {
+  if (goal.type === 'club_solid_contact') {
+    return shots.filter((sh) => sh.club === goal.club);
+  }
+  const dominant = s.clubs.length ? [...s.clubs].sort((a, b) => b.count - a.count)[0] : null;
+  if (!dominant || dominant.club !== goal.context?.club) return [];
+  if (goal.type === 'target_accuracy') {
+    if (goal.targetDistance == null) return []; // a goal saved before targetDistance existed — can't locate its shots
+    return shots.filter((sh) => sh.target_distance_yards === goal.targetDistance && isFiniteNumber(sh.distance_yards));
+  }
+  return shots;
+}
+
+// The value actually achieved, in the SAME unit/metric the goal's own
+// target is expressed in — dispatched by the goal's stored `metric`, never
+// by re-deriving a different measurement of "how good was contact."
+function actualValueForGoal(goal, relevantShots) {
+  switch (goal.metric) {
+    case 'solid_percentage':
+      return strikeBreakdown(relevantShots).solid.pct;
+    case 'top_fat_percentage': {
+      const b = strikeBreakdown(relevantShots);
+      return round1(b.topped.pct + b.fat.pct);
+    }
+    case 'straight_percentage':
+      return directionBreakdown(relevantShots).straight.pct;
+    case 'solid_streak':
+      return streaksSummary(relevantShots).solid.length;
+    case 'clean_contact_streak':
+      return cleanContactStreak(relevantShots).length;
+    case 'club_solid_ratio':
+      return Math.floor((strikeBreakdown(relevantShots).solid.pct / 100) * 10);
+    case 'dominant_direction_ratio': {
+      const dir = directionBreakdown(relevantShots);
+      return Math.floor(((dir[goal.direction]?.pct ?? 0) / 100) * 10);
+    }
+    case 'target_within_10yd_percentage': {
+      const withinCount = relevantShots.filter((sh) => Math.abs(sh.distance_yards - goal.targetDistance) <= 10).length;
+      return relevantShots.length ? round1((withinCount / relevantShots.length) * 100) : 0;
+    }
+    default:
+      return null;
+  }
+}
+
+// Ratio ("out of 10") and streak-length metrics are whole numbers, so being
+// short by exactly 1 unit reads as "almost" (matches the product examples:
+// "5 of 10 — one short of your goal" = almost, not a fail). Percentage
+// metrics get a wider band since a single shot swings them several points.
+const ALMOST_MARGIN_UNIT = 1;
+const ALMOST_MARGIN_PCT = 5;
+const RATIO_OR_STREAK_METRICS = ['club_solid_ratio', 'dominant_direction_ratio', 'solid_streak', 'clean_contact_streak'];
+
+function classifyOutcome(goal, actual) {
+  const margin = RATIO_OR_STREAK_METRICS.includes(goal.metric) ? ALMOST_MARGIN_UNIT : ALMOST_MARGIN_PCT;
+  if (goal.comparisonOperator === 'lt') {
+    if (actual < goal.target) return 'met';
+    if (actual < goal.target + margin) return 'almost';
+    return 'not_met';
+  }
+  // 'gte'
+  if (actual >= goal.target) return 'met';
+  if (actual >= goal.target - margin) return 'almost';
+  return 'not_met';
+}
+
+function formatMetricValue(goal, value) {
+  if (RATIO_OR_STREAK_METRICS.includes(goal.metric)) {
+    return goal.metric.endsWith('_ratio') ? `${value} of 10` : `${value}`;
+  }
+  return `${value}%`;
+}
+
+const EVAL_HEADLINES = { met: 'You Got It', almost: 'Almost There', not_met: 'Not Quite' };
+
+function conclusiveDetail(goal, actual, outcome) {
+  const actualStr = formatMetricValue(goal, actual);
+  const targetStr = formatMetricValue(goal, goal.target);
+  if (outcome === 'met') return `${actualStr} — you hit your goal of ${targetStr}.`;
+  if (outcome === 'almost') return `${actualStr} — close to your goal of ${targetStr}.`;
+  return `${actualStr} — short of your goal of ${targetStr}.`;
+}
+
+function notEnoughDataDetail(goal, relevantCount) {
+  const goalClub = goal.type === 'club_solid_contact' ? goal.club : goal.context?.club;
+  // Zero relevant shots almost always means the club didn't match at all —
+  // worth saying plainly, rather than the more generic "not enough" framing
+  // that fits a genuine too-small sample of the RIGHT club/context.
+  if (relevantCount === 0 && goalClub) {
+    return `Today wasn't a ${goalClub} session — this goal needs a comparable one to check.`;
+  }
+  const what = goal.type === 'club_solid_contact' ? `${goal.club} shots` : 'comparable shots';
+  return `You only logged ${relevantCount} ${what} today — not enough to check this goal yet.`;
+}
+
+// Returns { outcome, actual, target, comparisonOperator, relevantShotCount,
+// requiredShotCount, metric, headline, detail }. `actual` is null for
+// 'not_enough_data' — never a fabricated number standing in for "unknown."
+export function evaluateGoal(goal, session, shots, s) {
+  const relevant = relevantShotsForGoal(goal, shots, s);
+  const required = minRelevantShotsFor(goal);
+
+  if (relevant.length < required) {
+    return {
+      outcome: 'not_enough_data',
+      actual: null,
+      target: goal.target,
+      comparisonOperator: goal.comparisonOperator,
+      relevantShotCount: relevant.length,
+      requiredShotCount: required,
+      metric: goal.metric,
+      headline: 'Still Active',
+      detail: notEnoughDataDetail(goal, relevant.length),
+    };
+  }
+
+  const actualRaw = actualValueForGoal(goal, relevant);
+  const actual = round1(actualRaw);
+  const outcome = classifyOutcome(goal, actual);
+  return {
+    outcome,
+    actual,
+    target: goal.target,
+    comparisonOperator: goal.comparisonOperator,
+    relevantShotCount: relevant.length,
+    requiredShotCount: required,
+    metric: goal.metric,
+    headline: EVAL_HEADLINES[outcome],
+    detail: conclusiveDetail(goal, actual, outcome),
+  };
 }

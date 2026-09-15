@@ -4,22 +4,24 @@ import {
   directionBarHtml, heightDistributionHtml, contactDistributionHtml, weatherIconHtml,
 } from '../ui.js';
 import { sessionSummary, strikeBreakdown } from '../stats.js';
-import { getComparisonContext, getPersonalBests } from '../sessionAnalysis.js';
+import { getComparisonContext, getPersonalBests, continueGoal, setNewGoalFromSession, dismissGoalForSession } from '../sessionAnalysis.js';
 import { buildRecapInsight, getNextGoal } from '../sessionStory.js';
 import {
   comparisonSectionHtml, bestWindowSectionHtml, bestWindowComparisonSectionHtml,
   targetAccuracySectionHtml, streaksSectionHtml, distanceDetailHtml,
   recapMetaHtml, recapArcHtml, recapSecondaryMetricsHtml, insightCardHtml, recapBestStretchHtml,
-  exploreSessionRowHtml, nextGoalCardHtml,
+  cleanContactStreakCardHtml, exploreSessionRowHtml, nextGoalCardHtml, comparisonPillHtml, goalEvaluationCardHtml,
   shotTimelineHtml, timelineLegendHtml, bindShotTimeline, blocksFlowHtml, firstLastCompactHtml,
   conditionsGroupHtml,
   exploreSectionHtml, xsRowHtml, xsSubTitleHtml, xsGroupBreakdownHtml, bindExploreAccordion,
   performanceSummaryLine, sessionFlowSummaryLine, practiceSummaryLine, conditionsSummaryLine,
+  yourGrooveRowHtml,
 } from '../summarySections.js';
 import { downloadSessionCSV } from '../export.js';
 import { openLocationSheet } from './locationSheet.js';
+import { setGrooveReturn } from '../state.js';
 
-export function renderSummary(root, sessionId) {
+export function renderSummary(root, sessionId, { showExplore = false } = {}) {
   const session = db.getSession(sessionId);
   if (!session) { location.hash = '#/history'; return; }
   const shots = db.getShotsForSession(sessionId);
@@ -27,7 +29,37 @@ export function renderSummary(root, sessionId) {
   const comparison = getComparisonContext(session, shots, s.bestWindow);
   const personalBests = getPersonalBests(session, shots, s);
   const insight = buildRecapInsight(s, comparison, personalBests, session, shots);
-  const nextGoal = getNextGoal(s, shots, session);
+
+  // ---------- Next Goal / goal evaluation ----------
+  // If THIS session was the one that evaluated a previously-active goal
+  // (see sessionAnalysis.js's finalizeSessionGoal — evaluation happens once,
+  // at finish time, never here on render), show that result instead of the
+  // normal forward-looking Next Goal card. The two are mutually exclusive:
+  // a session either evaluates an existing goal or gets a fresh one of its
+  // own, never both.
+  const evaluatedGoal = db.getGoals().find((g) => g.evaluation?.evaluated_by_session_id === sessionId);
+  let goalSectionHtml;
+  if (evaluatedGoal) {
+    const ev = evaluatedGoal.evaluation;
+    if (ev.outcome === 'not_enough_data') {
+      goalSectionHtml = goalEvaluationCardHtml(ev, { actions: false });
+    } else {
+      const newGoalThisSession = db.getGoalForSession(sessionId);
+      const alreadyActedOn = !!newGoalThisSession || evaluatedGoal.status === 'active' || ev.dismissed;
+      goalSectionHtml = goalEvaluationCardHtml(ev, { goalId: evaluatedGoal.goal_id, actions: !alreadyActedOn })
+        + (newGoalThisSession ? nextGoalCardHtml(newGoalThisSession) : '');
+    }
+  } else {
+    goalSectionHtml = nextGoalCardHtml(getNextGoal(s, shots, session));
+  }
+
+  // Only a genuinely comparable session (club/setup/swing-matched, per
+  // findComparableSession) ever produces a hero delta — comparison.match
+  // still exists for an uncomparable prior session (used by the Explore
+  // Session detail card, which labels that case explicitly), but the
+  // primary recap must never imply a real comparison against an unrelated
+  // chronological "previous session."
+  const solidDelta = comparison && comparison.match.comparable ? comparison.metricsCompare.solid.diff : null;
 
   const { primary: locationPrimary, secondary: locationSecondary } = db.sessionLocationDisplay(session);
   const locationLabel = locationPrimary || (session.location_candidates?.length ? `${session.location_candidates.length} nearby options` : 'Not set');
@@ -59,12 +91,15 @@ export function renderSummary(root, sessionId) {
       <div class="recap-hero-content">
         ${recapMetaHtml(session, s, fmtDate, shots)}
         ${recapArcHtml(s.strike.solid.pct)}
+        ${comparisonPillHtml(solidDelta)}
       </div>
     </div>
 
     ${recapSecondaryMetricsHtml(s.direction.straight.pct, s.distance.medianSolid)}
 
     ${insight ? insightCardHtml(insight) : ''}
+
+    ${cleanContactStreakCardHtml(s.cleanContactStreak)}
 
     ${shots.length ? `
       <div class="section-title">Your Session</div>
@@ -74,7 +109,7 @@ export function renderSummary(root, sessionId) {
 
     ${recapBestStretchHtml(s.bestWindow)}
 
-    ${nextGoal ? nextGoalCardHtml(nextGoal) : ''}
+    ${goalSectionHtml}
 
     ${exploreSessionRowHtml()}
   `;
@@ -141,6 +176,8 @@ export function renderSummary(root, sessionId) {
 
     ${exploreHtml}
 
+    ${yourGrooveRowHtml()}
+
     <div class="btn-row" style="margin-top:var(--space-5);">
       <button class="btn" id="viewShotsBtn">View All Shots</button>
       <button class="btn" id="exportBtn">Export CSV</button>
@@ -151,12 +188,12 @@ export function renderSummary(root, sessionId) {
     <div class="screen">
       <div class="topbar">
         <button class="back" id="homeBtn">&larr; Home</button>
-        <span class="screen-title">Session Summary</span>
+        <span class="screen-title">${showExplore ? 'Explore Session' : 'Session Summary'}</span>
         <span class="side-space"></span>
       </div>
       <div class="scroll">
-        <div id="recapView">${recapHtml}</div>
-        <div id="fullView" hidden>${fullHtml}</div>
+        <div id="recapView" ${showExplore ? 'hidden' : ''}>${recapHtml}</div>
+        <div id="fullView" ${showExplore ? '' : 'hidden'}>${fullHtml}</div>
       </div>
 
       <button class="btn btn-primary" id="doneBtn" style="margin-top:var(--space-3);">Done</button>
@@ -172,6 +209,18 @@ export function renderSummary(root, sessionId) {
   qs('#exportBtn', root).addEventListener('click', () => { downloadSessionCSV(sessionId); });
   qs('#changeLocationBtn', root).addEventListener('click', () => {
     openLocationSheet(session, () => renderSummary(root, sessionId));
+  });
+  qs('#goalContinueBtn', root)?.addEventListener('click', (e) => {
+    continueGoal(e.currentTarget.dataset.goalId);
+    renderSummary(root, sessionId, { showExplore });
+  });
+  qs('#goalNewBtn', root)?.addEventListener('click', () => {
+    setNewGoalFromSession(sessionId);
+    renderSummary(root, sessionId, { showExplore });
+  });
+  qs('#goalDismissBtn', root)?.addEventListener('click', (e) => {
+    dismissGoalForSession(e.currentTarget.dataset.goalId);
+    renderSummary(root, sessionId, { showExplore });
   });
 
   const recapEl = qs('#recapView', root);
@@ -192,5 +241,9 @@ export function renderSummary(root, sessionId) {
     recapEl.hidden = false;
     titleEl.textContent = 'Session Summary';
     scrollEl.scrollTop = 0;
+  });
+  qs('#viewYourGrooveBtn', root)?.addEventListener('click', () => {
+    setGrooveReturn(`#/summary/${sessionId}/explore`);
+    location.hash = `#/groove/${sessionId}`;
   });
 }

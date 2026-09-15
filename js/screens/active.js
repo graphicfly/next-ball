@@ -4,6 +4,7 @@ import { startNewShotDraft, startEditShotDraft, setFlowReturn } from '../state.j
 import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking, refreshWeatherNow, isFetchingWeather } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
+import { finalizeSessionGoal } from '../sessionAnalysis.js';
 import { openLocationSheet } from './locationSheet.js';
 import { openShotDrillSheet, openShotTrainingAidSheet, openShotSetupSheet, openShotTargetSheet } from './historyDetail.js';
 
@@ -274,6 +275,7 @@ export function renderActive(root) {
 
   qs('#finishBtn', root).addEventListener('click', () => {
     db.finishSession(session.session_id);
+    finalizeSessionGoal(session.session_id);
     disableWakeLock();
     stopWeatherTracking();
     location.hash = `#/checkin/${session.session_id}`;

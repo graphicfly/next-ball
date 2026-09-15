@@ -6,6 +6,7 @@ import { renderCheckin } from './screens/checkin.js';
 import { renderSummary } from './screens/summary.js';
 import { renderHistory } from './screens/history.js';
 import { renderHistoryDetail } from './screens/historyDetail.js';
+import { renderYourGroove } from './screens/yourGroove.js';
 import { renderTrends } from './screens/trends.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getSettings } from './db.js';
@@ -25,8 +26,10 @@ const routes = [
   { pattern: /^#\/log\/(strike|direction|height|distance)$/, render: (m) => renderShotEntry(root, m[1]) },
   { pattern: /^#\/checkin\/([^/]+)$/, render: (m) => renderCheckin(root, m[1]) },
   { pattern: /^#\/summary\/([^/]+)$/, render: (m) => renderSummary(root, m[1]) },
+  { pattern: /^#\/summary\/([^/]+)\/explore$/, render: (m) => renderSummary(root, m[1], { showExplore: true }) },
   { pattern: /^#\/history$/, render: () => renderHistory(root) },
   { pattern: /^#\/history\/([^/]+)$/, render: (m) => renderHistoryDetail(root, m[1]) },
+  { pattern: /^#\/groove\/([^/]+)$/, render: (m) => renderYourGroove(root, m[1]) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];

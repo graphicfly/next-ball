@@ -9,6 +9,9 @@ import { buildRecapInsight } from '../js/sessionStory.js';
 // contrast > short-session factual composition > nothing. No Best Stretch
 // tier — recapBestStretchHtml() already renders that window unconditionally
 // elsewhere on the recap, so an insight-card copy would always duplicate it.
+// Same reasoning removed the old "Clean Contact Streak" (>= 6) tier once
+// Session Summary got its own dedicated, unconditional Clean Contact Streak
+// card (see the "Duplicate Clean Contact Streak prevention" block below).
 
 function strikeShape(counts) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -140,13 +143,7 @@ describe('Target accuracy', () => {
 });
 
 describe('Streaks', () => {
-  test('a clean-contact streak of 6+ is reported', () => {
-    const s = baseSummary({ streaks: { cleanContact: { length: 7 }, solid: { length: 0 } } });
-    const insight = buildRecapInsight(s, null, [], {});
-    assert.equal(insight.headline, 'Clean Contact Streak');
-  });
-
-  test('a solid streak of 4+ is reported when clean-contact does not qualify', () => {
+  test('a solid streak of 4+ is reported', () => {
     const s = baseSummary({ streaks: { cleanContact: { length: 2 }, solid: { length: 5 } } });
     const insight = buildRecapInsight(s, null, [], {});
     assert.equal(insight.headline, 'Solid Streak');
@@ -266,6 +263,16 @@ describe('Duplicate Best Stretch prevention', () => {
       const s = baseSummary({ bestWindow: { solidPct, startBall: 1, endBall: 10 } });
       const insight = buildRecapInsight(s, null, [], {});
       assert.equal(insight, null, `solidPct=${solidPct} should not produce a Best-Stretch-shaped insight`);
+    }
+  });
+});
+
+describe('Duplicate Clean Contact Streak prevention', () => {
+  test('a long streaks.cleanContact value never by itself produces a "Clean Contact Streak"-headlined insight — the dedicated Session Summary card already covers it', () => {
+    for (const length of [6, 10, 20]) {
+      const s = baseSummary({ streaks: { cleanContact: { length }, solid: { length: 0 } } });
+      const insight = buildRecapInsight(s, null, [], {});
+      assert.notEqual(insight?.headline, 'Clean Contact Streak', `cleanContact.length=${length} should not produce this headline anymore`);
     }
   });
 });

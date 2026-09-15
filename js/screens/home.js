@@ -1,9 +1,10 @@
 import * as db from '../db.js';
-import { qs, fmtDate, fmtSetup, fmtSurface, fmtSwing, escapeHtml, trapSheetFocus, todayLocalDate, nowLocalTime } from '../ui.js';
+import { qs, fmtDate, fmtSetup, fmtSurface, fmtSwing, fmtDurationWords, escapeHtml, trapSheetFocus, todayLocalDate, nowLocalTime } from '../ui.js';
 import { clubSummaryLabel } from '../stats.js';
 import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
+import { finalizeSessionGoal } from '../sessionAnalysis.js';
 
 function icon(paths) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
@@ -19,6 +20,10 @@ const ICON_FLAG = '<path d="M6 21V4" /><path d="M6 4.5h12l-3 4 3 4H6" />';
 const ICON_CLUB_SMALL = '<path d="M16.5 3.5 9 15" /><ellipse cx="7.7" cy="16.8" rx="2.6" ry="1.7" transform="rotate(-25 7.7 16.8)" />';
 const ICON_LIE_SMALL = '<path d="M3 17c2.5-3.5 5-3.5 7.5 0s5 3.5 7.5 0" />';
 const ICON_SURFACE_SMALL = '<rect x="8" y="8" width="8" height="8" rx="1" transform="rotate(45 12 12)" />';
+// Distinct from ICON_CLOCK (used for swing length above) — this one reads
+// as "time elapsed," not "swing tempo," so the two meanings never share a
+// glyph within the same metadata row.
+const ICON_ELAPSED = '<path d="M7 3h10M7 21h10" /><path d="M7 3c0 4 3 5 5 6-2 1-5 2-5 6M17 3c0 4-3 5-5 6 2 1 5 2 5 6" />';
 
 // Starts today's session immediately using whatever defaults the golfer
 // last used — the same fields #/start pre-fills from. Kept local to this
@@ -63,6 +68,15 @@ export function renderHome(root) {
       ? 'No shots have been logged.'
       : `Session will be saved with ${shots.length} shot${shots.length === 1 ? '' : 's'}.`;
 
+    // Warning-soft fill + warning accent edge per docs/ux-spec.md §3.12 —
+    // this slot sits directly under the hero as Home's brightest element
+    // whenever a session is paused/in-progress, since it's the screen's
+    // answer to "what do I do next." Resume stays accent green (the banner
+    // itself is amber, the action is not); End Session is a plain tertiary
+    // text action, never colored as a destructive/danger control — ending
+    // a session with shots logged just saves it, it doesn't discard anything.
+    const elapsedWords = fmtDurationWords((Date.now() - new Date(activeSession.created_at).getTime()) / 1000);
+
     activeCardHtml = `
       <div class="card home-active-card">
         <div class="home-active-header">
@@ -77,11 +91,11 @@ export function renderHome(root) {
           ${metaItemHtml(icon(ICON_CLOCK), fmtSwing(activeSession.current_swing))}
           ${metaItemHtml(icon(ICON_LIE_SMALL), fmtSetup(activeSession.current_setup))}
           ${metaItemHtml(icon(ICON_SURFACE_SMALL), fmtSurface(activeSession.current_surface))}
+          ${elapsedWords ? metaItemHtml(icon(ICON_ELAPSED), elapsedWords) : ''}
         </div>
         <div class="hairline"></div>
         <button class="btn btn-primary btn-hero btn-log-shot" id="resumeBtn">${icon(ICON_PLAY)}<span>Resume Session</span></button>
-        <div class="home-active-or"><span>or</span></div>
-        <button class="home-active-end" id="endSessionBtn" aria-label="${endLabel}">${icon(ICON_FLAG)}<span>${endLabel}</span></button>
+        <button class="home-active-end tertiary-link" id="endSessionBtn" aria-label="${endLabel}" style="width:100%; margin-top:var(--space-2);">${endLabel}</button>
         <div class="home-active-end-note">${escapeHtml(endNote)}</div>
       </div>`;
   }
@@ -188,6 +202,7 @@ function openEndSessionSheet(session, homeRoot) {
 
   qs('#confirmEndBtn', backdrop).addEventListener('click', () => {
     db.finishSession(session.session_id);
+    finalizeSessionGoal(session.session_id);
     if (zeroShot) {
       try { db.deleteSession(session.session_id); } catch (e) { /* best-effort — session is at least finished/inactive either way */ }
     }

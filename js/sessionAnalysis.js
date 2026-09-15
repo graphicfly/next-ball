@@ -7,8 +7,9 @@
 import * as db from './db.js';
 import {
   findComparableSession, compareMetrics, compareBestWindows, compareTargetAccuracy, bestWindow, targetAccuracyGroups,
-  strikeBreakdown, streaksSummary, distanceConsistency,
+  strikeBreakdown, streaksSummary, distanceConsistency, sessionSummary,
 } from './stats.js';
+import { getNextGoal, evaluateGoal } from './sessionStory.js';
 
 // Returns null if there's no prior finished session to compare against at
 // all. Otherwise returns { match, metricsCompare, bestWindowCompare,
@@ -85,4 +86,94 @@ export function getPersonalBests(session, shots, s) {
   }
 
   return bests;
+}
+
+// ---------- Next Goal persistence + evaluation ----------
+// The single call site that creates, evaluates, or resolves a goal —
+// called exactly once, at the moment a session transitions to 'finished'
+// (see active.js's Finish button, home.js's End Session sheet, and
+// shotEntry.js's in-flow End Session). Never called from a screen's render
+// path, so revisiting Session Summary, Explore Session, or Home never
+// regenerates or re-persists anything — those screens only ever READ via
+// db.getActiveGoal()/db.getGoalForSession(), never write.
+//
+// Lifecycle, in order:
+//   1. If there's a currently active goal, this session is first offered as
+//      a chance to EVALUATE it (see sessionStory.js's evaluateGoal) —
+//      never simply overwritten just because a new session happened.
+//        - Not enough comparable data -> the attempt is recorded (so
+//          Session Summary can explain why), status stays 'active', and
+//          this session does NOT get a replacement goal of its own — the
+//          golfer hasn't had a fair shot at the current one yet, so
+//          nothing should compete with it.
+//        - A conclusive result (met/almost/not_met) -> the goal is
+//          resolved with that outcome. What happens next (keep the same
+//          goal, set a new one, or dismiss) is the golfer's call, made on
+//          Session Summary (see continueGoal/setNewGoalFromSession/
+//          dismissGoalForSession below) — this function deliberately does
+//          NOT auto-create a replacement in this branch.
+//   2. Only when there was no active goal to begin with (first session
+//      ever, or the golfer already chose "dismiss" with nothing pending)
+//      does this session get an automatic fresh goal from its own data —
+//      the original, unconditional behavior for that specific case.
+export function finalizeSessionGoal(sessionId) {
+  const alreadyHandled = db.getGoalForSession(sessionId)
+    || db.getGoals().some((g) => g.evaluation && g.evaluation.evaluated_by_session_id === sessionId);
+  if (alreadyHandled) return null; // already finalized for this session
+
+  const session = db.getSession(sessionId);
+  if (!session) return null;
+  const shots = db.getShotsForSession(sessionId);
+  const s = sessionSummary(shots);
+
+  const activeGoal = db.getActiveGoal();
+  if (activeGoal) {
+    const result = evaluateGoal(activeGoal, session, shots, s);
+    const record = { ...result, evaluated_by_session_id: sessionId, evaluated_at: new Date().toISOString(), dismissed: false };
+    if (result.outcome === 'not_enough_data') {
+      db.recordGoalEvaluationAttempt(activeGoal.goal_id, record);
+    } else {
+      db.resolveGoal(activeGoal.goal_id, GOAL_OUTCOME_TO_STATUS[result.outcome], { evaluation: record });
+    }
+    return null; // either way, this session does not also create its own goal
+  }
+
+  const goal = getNextGoal(s, shots, session);
+  if (!goal) return null;
+  return db.createGoal(sessionId, goal);
+}
+
+const GOAL_OUTCOME_TO_STATUS = { met: 'met', almost: 'partially_met', not_met: 'not_met' };
+
+// ---------- Next Goal evaluation — user next-step actions ----------
+// Session Summary offers exactly these three choices once an evaluation is
+// conclusive (see summarySections.js's goalEvaluationCardHtml) — nothing
+// else in the app writes to a goal's status/evaluation after the fact.
+
+// "Continue This Goal" — puts the just-evaluated goal back to 'active' so
+// the golfer gets another shot at the identical target next time.
+export function continueGoal(goalId) {
+  return db.reactivateGoal(goalId);
+}
+
+// "Set New Goal" — generates a fresh goal from THIS session's own data,
+// same generator Finish would have used if there'd been nothing to
+// evaluate. Safe to call at most meaningfully once per session: if this
+// session already produced a goal (because the golfer already chose this),
+// there's nothing left to do.
+export function setNewGoalFromSession(sessionId) {
+  if (db.getGoalForSession(sessionId)) return null;
+  const session = db.getSession(sessionId);
+  if (!session) return null;
+  const shots = db.getShotsForSession(sessionId);
+  const s = sessionSummary(shots);
+  const goal = getNextGoal(s, shots, session);
+  if (!goal) return null;
+  return db.createGoal(sessionId, goal);
+}
+
+// "Dismiss For Now" — acknowledges the result without setting anything new;
+// the golfer simply has no active goal until a future session creates one.
+export function dismissGoalForSession(goalId) {
+  return db.dismissGoalEvaluation(goalId);
 }

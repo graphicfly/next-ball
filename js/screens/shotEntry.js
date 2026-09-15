@@ -3,6 +3,7 @@ import { qs, qsa, cap, toast } from '../ui.js';
 import { getDraft, setDraftField, clearDraft, getFlowReturn } from '../state.js';
 import { disableWakeLock } from '../wakeLock.js';
 import { stopWeatherTracking } from '../sessionWeather.js';
+import { finalizeSessionGoal } from '../sessionAnalysis.js';
 
 const ICON_FLAG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4.5h12l-3 4 3 4H6"/></svg>';
 
@@ -353,6 +354,7 @@ export function renderShotEntry(root, step) {
     // is discarded, same as Cancel; there's no partial-shot save to lose.
     clearDraft();
     db.finishSession(activeSession.session_id);
+    finalizeSessionGoal(activeSession.session_id);
     disableWakeLock();
     stopWeatherTracking();
     location.hash = `#/checkin/${activeSession.session_id}`;

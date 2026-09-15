@@ -185,6 +185,18 @@ export function streaksSummary(shots) {
   };
 }
 
+// Longest run with no Top, Fat, Shank, or Miss — stricter than
+// streaksSummary().cleanContact above (which excludes only Top/Fat, and
+// Explore Session already displays with that meaning unchanged; see the
+// note there). This is the ONE "clean contact" definition Session Summary's
+// dedicated Clean Contact Streak card and Groove Score's clean-streak
+// component both use, so the two ideas never silently mean different things
+// in different places.
+export function cleanContactStreak(shots) {
+  const sorted = [...shots].sort((a, b) => a.shot_number - b.shot_number);
+  return longestStreak(sorted, (s) => s.strike === 'solid' || s.strike === 'thin');
+}
+
 // null if the window's shots don't all share one identical, non-null target.
 function uniformTarget(windowShots) {
   const targets = new Set(windowShots.map((s) => s.target_distance_yards ?? null));
@@ -534,6 +546,126 @@ export function shotTimingStats(shots) {
   return { gaps, avgGapSeconds, totalDurationSeconds, longBreaks };
 }
 
+// ---------- Groove Score ----------
+// A 0-100 session-level score for how repeatable and playable a practice
+// session was — see docs/ux-spec.md §3.11. Deliberately NOT part of
+// sessionSummary(): it must never appear on Session Summary/History Detail,
+// only on the dedicated Your Groove screen, so it's called independently
+// wherever it's actually wanted. Distance is excluded from V1 (unreliable
+// range-estimated distances must not influence the signature score).
+//
+// Every tunable below ships as a named, exported constant rather than an
+// inline literal, per spec — this is V1 and expected to be validated/tuned
+// against real sessions.
+export const GROOVE_SCORE_VERSION = 1;
+export const GROOVE_MIN_SHOTS = 10;
+export const GROOVE_BEST_WINDOW_MIN_SHOTS = 15;
+export const GROOVE_WEIGHTS = { contact: 0.50, bestWindow: 0.20, direction: 0.15, cleanStreak: 0.15 };
+export const GROOVE_CONTACT_POINTS = { solid: 100, thin: 65, topped: 20, fat: 20, shank: 0, miss: 0 };
+export const GROOVE_DIRECTION_BLEND = { repeatability: 0.70, straightness: 0.30 };
+export const GROOVE_CLEAN_STREAK_TARGET = 10;
+
+const GROOVE_COMPONENT_LABELS = {
+  contact: 'Contact Quality',
+  bestWindow: 'Best Sustained Window',
+  direction: 'Direction Control',
+  cleanStreak: 'Clean Contact Streak',
+};
+
+// A breakdown's percentages (per STRIKE key) always sum to 100, so this
+// weighted sum divided by 100 is exactly the mean of GROOVE_CONTACT_POINTS
+// over every individual shot — without needing the raw shot list. Reused
+// for both the whole session and a single 10-shot window: a window's
+// windowMetrics() already carries shankMissPct as one combined figure
+// (never split shank/miss), which is harmless here since both score 0.
+function contactPointsFromBreakdown(pctByKey) {
+  return STRIKE.reduce((sum, k) => sum + (pctByKey[k] ?? 0) * GROOVE_CONTACT_POINTS[k], 0) / 100;
+}
+
+// Contact Quality (50% weight) — the mean of GROOVE_CONTACT_POINTS over
+// every shot in the session. Exported (and shots-based, not
+// breakdown-based) so it's independently callable/testable on its own,
+// same as directionControlScore and cleanContactStreak below — the whole
+// point of a "centralized, explainable" formula is that each component can
+// be inspected in isolation, not just as a side effect of grooveScore().
+export function contactQualityScore(shots) {
+  return contactPointsFromBreakdown(Object.fromEntries(STRIKE.map((k) => [k, strikeBreakdown(shots)[k].pct])));
+}
+
+// Direction Control (15% weight) — 70% directional repeatability + 30%
+// straightness. Repeatability rewards ANY consistent shot shape (a golfer
+// who reliably draws the ball scores well here, not just one who hits it
+// dead straight); the 30% straightness term is the hedge, since the app's
+// Left/Straight/Right buckets can't distinguish a playable draw from a
+// genuine miss. Named (and exported) as directionControlScore deliberately
+// — never "straightnessScore," which would misdescribe what this measures
+// and invite a future edit back to pure straight%.
+export function directionControlScore(shots) {
+  const dir = directionBreakdown(shots);
+  const repeatability = Math.max(dir.left.pct, dir.straight.pct, dir.right.pct);
+  const straightness = dir.straight.pct;
+  return GROOVE_DIRECTION_BLEND.repeatability * repeatability + GROOVE_DIRECTION_BLEND.straightness * straightness;
+}
+
+// Clean Contact Streak (15% weight) — the longest run with no Top, Fat,
+// Shank, or Miss (stats.cleanContactStreak(), shared with Session Summary's
+// own dedicated card), scored against a FIXED target run length rather than
+// normalized by session length — see GROOVE_CLEAN_STREAK_TARGET below for
+// why a fixed target is the length-neutral choice.
+export function cleanContactStreakScore(shots) {
+  return Math.min(100, (100 * cleanContactStreak(shots).length) / GROOVE_CLEAN_STREAK_TARGET);
+}
+
+// Pure function of a shot array — no session, no DOM, no storage. Returns
+// the score, its per-component breakdown (only components with enough data
+// to compute), the list of dropped components, and the formula version, so
+// every consumer (Your Groove screen, CSV export, tests) reads the exact
+// same shape. The score is always derived on read here and is never
+// persisted by any caller.
+export function grooveScore(shots) {
+  const total = shots.length;
+  if (total < GROOVE_MIN_SHOTS) {
+    return { version: GROOVE_SCORE_VERSION, total, score: null, shotsUntilAvailable: GROOVE_MIN_SHOTS - total, components: [], dropped: [] };
+  }
+
+  const raw = {
+    contact: contactQualityScore(shots),
+    direction: directionControlScore(shots),
+    cleanStreak: cleanContactStreakScore(shots),
+  };
+
+  // Below 15 shots the best window is nearly the whole session and would
+  // just restate Contact Quality — dropped via reweighting, not scored as 0.
+  if (total >= GROOVE_BEST_WINDOW_MIN_SHOTS) {
+    const w = bestWindow(shots);
+    if (w) {
+      raw.bestWindow = contactPointsFromBreakdown({
+        solid: w.solidPct, thin: w.thinPct, topped: w.toppedPct, fat: w.fatPct, shank: 0, miss: w.shankMissPct,
+      });
+    }
+  }
+
+  const keys = Object.keys(GROOVE_WEIGHTS);
+  const availableKeys = keys.filter((k) => raw[k] !== undefined);
+  const dropped = keys.filter((k) => raw[k] === undefined);
+  const availableWeightSum = availableKeys.reduce((sum, k) => sum + GROOVE_WEIGHTS[k], 0);
+
+  const components = availableKeys.map((k) => ({
+    key: k,
+    label: GROOVE_COMPONENT_LABELS[k],
+    score: Math.round(raw[k]),
+    // Rounded to 2 decimals (not round1's 1) — 62.5/18.75 need that
+    // precision to render exactly, and the extra digit also absorbs the
+    // float noise that (weight / sum) * 100 otherwise leaves just short of
+    // a clean value like 18.75.
+    weight: Math.round((GROOVE_WEIGHTS[k] / availableWeightSum) * 10000) / 100,
+  }));
+
+  const score = Math.round(components.reduce((sum, c) => sum + c.score * (GROOVE_WEIGHTS[c.key] / availableWeightSum), 0));
+
+  return { version: GROOVE_SCORE_VERSION, total, score, shotsUntilAvailable: null, components, dropped };
+}
+
 export function sessionSummary(shots) {
   return {
     total: shots.length,
@@ -549,6 +681,7 @@ export function sessionSummary(shots) {
     timing: shotTimingStats(shots),
     consistency: consistencyMetrics(shots),
     streaks: streaksSummary(shots),
+    cleanContactStreak: cleanContactStreak(shots),
     bestWindow: bestWindow(shots),
     bestTargetedWindow: bestTargetedWindow(shots),
     targetAccuracy: targetAccuracyGroups(shots),

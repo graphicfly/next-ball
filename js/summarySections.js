@@ -263,31 +263,128 @@ export function recapMetaHtml(session, s, fmtDateFn, shots) {
     <div class="session-complete-sub">${fmtDateFn(session.date)}${durationStr ? ' &bull; ' + durationStr : ''}</div>`;
 }
 
-// A semicircle gauge for Solid Contact — the dominant number on the recap.
+// A semicircle gauge — shared by Session Summary's Solid Contact hero and
+// Your Groove's Groove Score hero (docs/ux-spec.md §3.4/§3.11 requires
+// "the identical dial component," never a second dial style in the app).
 // Both the glow and crisp strokes share one path with pathLength="100" set,
 // which normalizes the path to 100 units regardless of true arc geometry:
-// stroke-dasharray="pct, 100-pct" then directly encodes the percentage as a
-// dash length, no circumference math needed.
-export function recapArcHtml(solidPctRaw) {
-  const pctVal = Math.max(0, Math.min(100, Math.round(solidPctRaw)));
-  const gap = 100 - pctVal;
+// stroke-dasharray="value, 100-value" then directly encodes the value as a
+// dash length, no circumference math needed. At exactly 0, the progress
+// stroke is omitted entirely — stroke-linecap:round would otherwise paint a
+// visible cap at zero length and falsely imply progress.
+function arcGaugeHtml(valueRaw, { caption, ariaLabel, valueSuffix = '%', gaugeId }) {
+  const val = Math.max(0, Math.min(100, Math.round(valueRaw)));
+  const gap = 100 - val;
   const arcPath = 'M20,150 A140,140 0 0 1 300,150';
   return `
     <div class="recap-arc-wrap">
-      <svg class="recap-arc" viewBox="0 0 320 168" role="img" aria-label="${pctVal} percent solid contact">
+      <svg class="recap-arc" viewBox="0 0 320 168" role="img" aria-label="${ariaLabel}">
         <defs>
-          <filter id="recapArcGlow" x="-30%" y="-30%" width="160%" height="160%">
+          <filter id="${gaugeId}" x="-30%" y="-30%" width="160%" height="160%">
             <feGaussianBlur stdDeviation="6"></feGaussianBlur>
           </filter>
         </defs>
         <path class="recap-arc-track" d="${arcPath}" pathLength="100"></path>
-        <path class="recap-arc-fill-glow" d="${arcPath}" pathLength="100" stroke-dasharray="${pctVal} ${gap}" filter="url(#recapArcGlow)"></path>
-        <path class="recap-arc-fill" d="${arcPath}" pathLength="100" stroke-dasharray="${pctVal} ${gap}"></path>
+        ${val > 0 ? `
+          <path class="recap-arc-fill-glow" d="${arcPath}" pathLength="100" stroke-dasharray="${val} ${gap}" filter="url(#${gaugeId})"></path>
+          <path class="recap-arc-fill" d="${arcPath}" pathLength="100" stroke-dasharray="${val} ${gap}"></path>
+        ` : ''}
       </svg>
       <div class="recap-arc-label">
-        <div class="recap-arc-value">${pctVal}<span>%</span></div>
-        <div class="recap-arc-caption">Solid Contact</div>
+        <div class="recap-arc-value">${val}${valueSuffix ? `<span>${valueSuffix}</span>` : ''}</div>
+        <div class="recap-arc-caption">${caption}</div>
       </div>
+    </div>`;
+}
+
+export function recapArcHtml(solidPctRaw) {
+  const val = Math.max(0, Math.min(100, Math.round(solidPctRaw)));
+  return arcGaugeHtml(solidPctRaw, {
+    caption: 'Solid Contact',
+    ariaLabel: `${val} percent solid contact`,
+    valueSuffix: '%',
+    gaugeId: 'recapArcGlow',
+  });
+}
+
+// ---------- Groove Score (Your Groove screen) ----------
+// docs/ux-spec.md §3.11. A 0-100 session-level score, never zoned
+// red/amber/green and never restyled as a letter grade — accent color at
+// every value, since a low score is information ("not repeatable today"),
+// not a failure state.
+export function grooveDialHtml(score) {
+  return arcGaugeHtml(score, {
+    caption: 'GROOVE SCORE',
+    ariaLabel: `Groove Score ${Math.round(score)} out of 100`,
+    valueSuffix: '',
+    gaugeId: 'grooveArcGlow',
+  });
+}
+
+// The only empty state in the app justified against §1.4 ("never fabricate")
+// — the component's entire purpose is the number, so below 10 shots there's
+// no dial, no zero, no placeholder ring, just a quiet card naming the gap.
+export function grooveBuildingStateHtml(shotsUntilAvailable) {
+  return `
+    <div class="card groove-building-card">
+      <div class="groove-building-title">Building your Groove Score</div>
+      <div class="groove-building-sub">${shotsUntilAvailable} more shot${shotsUntilAvailable === 1 ? '' : 's'}</div>
+    </div>`;
+}
+
+// A shared comparison pill (§3.5) used by both Session Summary's Solid
+// Contact hero and Your Groove's Groove Score hero: improved gets the
+// accent wash, flat OR down both get the same neutral surface — never red
+// for a decline, since a worse number is neutral information, not
+// necessarily a failure. Deliberately its own builder rather than reusing
+// ui.js's deltaHtml/.metric-delta (used elsewhere in Summary/History Detail
+// for topped%/fat%/etc.), whose down-state is colored red — a pattern this
+// spec explicitly rules out for a top-level comparison pill (§5 Don't:
+// "Never red for a decline").
+export function comparisonPillHtml(diff) {
+  if (diff === null || diff === undefined) return '';
+  const improved = diff > 0;
+  const arrow = diff > 0 ? '&#8593;' : diff < 0 ? '&#8595;' : '&#8594;';
+  const sign = diff > 0 ? '+' : '';
+  const toneClass = improved ? 'comparison-pill-up' : 'comparison-pill-flat';
+  return `<div class="comparison-pill ${toneClass}">${arrow} ${sign}${diff} pts vs previous</div>`;
+}
+
+// One §3.3 stat row per surviving component — the score's honesty
+// mechanism: a dropped component is simply absent from this list rather
+// than shown as a warning or a zero.
+export function grooveFactorRowHtml(component) {
+  return xsRowHtml(component.label, `${component.score} &middot; ${Math.round(component.weight)}%`);
+}
+
+// Contact trend within the session — the one genuinely new metric on Your
+// Groove (everything else reuses existing builders/data). Deliberately
+// spare per §4.7: accent green on --color-surface-2, a single baseline, no
+// gridlines/ticks/tooltips — this is a shape to glance at, not a chart to
+// study. Uses GROOVE_CONTACT_POINTS so a shot's height on the line matches
+// exactly what Contact Quality itself measures.
+const CONTACT_TREND_POINTS = { solid: 100, thin: 65, topped: 20, fat: 20, shank: 0, miss: 0 };
+
+export function contactTrendHtml(shots) {
+  if (!shots.length) return '';
+  const sorted = [...shots].sort((a, b) => a.shot_number - b.shot_number);
+  const width = 320, height = 100, padX = 6, padY = 10;
+  const plotHeight = height - padY * 2;
+  const stepX = sorted.length > 1 ? (width - padX * 2) / (sorted.length - 1) : 0;
+  const scaleY = (v) => padY + plotHeight - (v / 100) * plotHeight;
+  const baseline = padY + plotHeight;
+
+  const pts = sorted.map((s, i) => ({ x: padX + i * stepX, y: scaleY(CONTACT_TREND_POINTS[s.strike] ?? 0) }));
+  const path = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+  const areaPath = pts.length > 1 ? `${path} L${pts[pts.length - 1].x.toFixed(1)},${baseline} L${pts[0].x.toFixed(1)},${baseline} Z` : '';
+
+  return `
+    <div class="groove-trend-card">
+      <svg class="groove-trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Contact quality across the session">
+        ${areaPath ? `<path d="${areaPath}" fill="var(--color-accent-soft)" stroke="none"></path>` : ''}
+        <line x1="${padX}" y1="${baseline}" x2="${width - padX}" y2="${baseline}" class="groove-trend-baseline" />
+        ${pts.length > 1 ? `<path d="${path}" fill="none" stroke="var(--color-accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>` : ''}
+      </svg>
     </div>`;
 }
 
@@ -344,12 +441,47 @@ export function recapBestStretchHtml(window) {
   });
 }
 
+// A dedicated, unconditional Clean Contact Streak card — the stricter
+// definition (no Top, Fat, Shank, or Miss; see stats.js's
+// cleanContactStreak()), distinct from streaksSummary().cleanContact, which
+// Explore Session still displays unchanged with its own looser meaning.
+// Omitted below a 2-shot streak — "1 shot in a row" isn't a streak, and
+// this stays an omission (not a placeholder) since the session's shot map
+// right below it already shows the raw data either way.
+const MIN_STREAK_TO_DISPLAY = 2;
+
+export function cleanContactStreakCardHtml(streak) {
+  if (!streak || streak.length < MIN_STREAK_TO_DISPLAY) return '';
+  return insightCardHtml({
+    icon: 'star',
+    headline: 'Clean Contact Streak',
+    sub: `${streak.length} shots in a row without a topped, fat, shank, or miss`,
+  });
+}
+
 // One deterministic, forward-looking challenge for next time — see
 // sessionStory.js's getNextGoal for the selection logic. Deliberately a
 // compact secondary card (reuses insight-card's dark surface), never
 // another giant gauge — this is a nudge, not a second hero metric.
+//
+// Unlike every other optional recap section, a missing goal still renders a
+// quiet neutral fallback rather than disappearing — Next Goal is expected
+// structure on every completed session (there's always something to work
+// on), so an empty slot here reads as broken, not as "nothing to report."
+// The fallback names no number and no target, so it never invents a false
+// precision the underlying data doesn't support.
 export function nextGoalCardHtml(goal) {
-  if (!goal) return '';
+  if (!goal) {
+    return `
+      <div class="insight-card next-goal-card">
+        <span class="insight-icon">${insightIconHtml('target')}</span>
+        <div class="next-goal-text">
+          <div class="next-goal-eyebrow">Next Goal</div>
+          <div class="next-goal-title">Keep Building Your Baseline</div>
+          <div class="next-goal-detail">Log a few more sessions and a specific goal will appear here.</div>
+        </div>
+      </div>`;
+  }
   return `
     <div class="insight-card next-goal-card">
       <span class="insight-icon">${insightIconHtml('target')}</span>
@@ -357,6 +489,49 @@ export function nextGoalCardHtml(goal) {
         <div class="next-goal-eyebrow">Next Goal</div>
         <div class="next-goal-title">${escapeHtml(goal.title)}</div>
         <div class="next-goal-detail">${escapeHtml(goal.detail)}</div>
+      </div>
+    </div>`;
+}
+
+// ---------- Next Goal evaluation result (Session Summary) ----------
+// Shown INSTEAD of the normal forward-looking nextGoalCardHtml() whenever
+// this session was the one that evaluated a previously-active goal (see
+// sessionAnalysis.js's finalizeSessionGoal) — never alongside it, so the
+// slot never shows two competing "goal" cards at once.
+
+// 'met' gets the same accent-green treatment as a Personal Best insight —
+// a genuine positive result, not a coaching nudge. Every other outcome
+// (almost/not_met/not_enough_data) stays in the same amber "in progress"
+// tone as the ordinary Next Goal card — not_met is deliberately NOT red:
+// per docs/ux-spec.md §2.1, red means destructive action, never poor
+// performance, and the copy stays encouraging either way.
+export function goalEvaluationCardHtml(evaluation, { goalId, actions = false } = {}) {
+  const actionsHtml = actions ? `
+    <div class="stack-sm goal-eval-actions">
+      <button class="btn btn-outline btn-sm" id="goalContinueBtn" data-goal-id="${goalId}">Continue This Goal</button>
+      <button class="btn btn-outline btn-sm" id="goalNewBtn" data-goal-id="${goalId}">Set New Goal</button>
+      <button class="btn btn-sm tertiary-link" id="goalDismissBtn" data-goal-id="${goalId}">Dismiss For Now</button>
+    </div>` : '';
+
+  if (evaluation.outcome === 'met') {
+    return `
+      <div class="insight-card">
+        <span class="insight-icon">${insightIconHtml('star')}</span>
+        <div class="next-goal-text">
+          <div class="insight-headline">${escapeHtml(evaluation.headline)}</div>
+          <div class="insight-sub">${escapeHtml(evaluation.detail)}</div>
+          ${actionsHtml}
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="insight-card next-goal-card">
+      <span class="insight-icon">${insightIconHtml('target')}</span>
+      <div class="next-goal-text">
+        <div class="next-goal-eyebrow">${escapeHtml(evaluation.headline)}</div>
+        <div class="next-goal-detail">${escapeHtml(evaluation.detail)}</div>
+        ${actionsHtml}
       </div>
     </div>`;
 }
@@ -374,6 +549,24 @@ export function exploreSessionRowHtml() {
       <span class="explore-row-text">
         <span class="explore-row-title">Explore Session</span>
         <span class="explore-row-sub">See detailed insights and shot data</span>
+      </span>
+      <span class="explore-row-chevron" aria-hidden="true">&rsaquo;</span>
+    </button>`;
+}
+
+// The one door deeper from Explore Session (docs/ux-spec.md §4.6 addition)
+// — same shell as exploreSessionRowHtml, different destination. Rendered at
+// the bottom of Session Summary's Explore layer AND History Detail, since
+// both are "Explore Session" for a session (just-finished vs.
+// revisited-later) and each screen in the ladder offers exactly one door
+// deeper.
+export function yourGrooveRowHtml() {
+  return `
+    <button class="explore-row" id="viewYourGrooveBtn" aria-label="Your Groove — how this session unfolded">
+      <span class="insight-icon">${insightIconHtml('trend')}</span>
+      <span class="explore-row-text">
+        <span class="explore-row-title">Your Groove</span>
+        <span class="explore-row-sub">How this session unfolded</span>
       </span>
       <span class="explore-row-chevron" aria-hidden="true">&rsaquo;</span>
     </button>`;
@@ -549,6 +742,10 @@ const EXPLORE_ICONS = {
   flow: '<path d="M4 16l6-6 4 4 7-8"/><path d="M14 6h7v7"/>',
   practice: '<path d="M6 21V4"/><path d="M6 4.5h11l-2.5 3.5L17 11.5H6"/>',
   conditions: '<path d="M7.5 17.5a4 4 0 0 1-.4-7.97 5 5 0 0 1 9.6-1.9 4.3 4.3 0 0 1-.2 9.87h-9Z"/>',
+  // Your Groove's own two sections (Direction Fan, Club + Training Aid
+  // Compare) reuse this same icon set/helper rather than a parallel one.
+  direction: '<path d="M12 3v9"/><path d="M12 12l-6 7"/><path d="M12 12l6 7"/>',
+  compare: '<path d="M6 20V10"/><path d="M12 20V4"/><path d="M18 20v-7"/>',
 };
 
 function exploreIcon(key) {
@@ -655,11 +852,42 @@ export function conditionsSummaryLine(session, locationPrimary) {
   ]) || 'No conditions recorded';
 }
 
+// ---------- Your Groove collapsed summary lines ----------
+// Same "real data, rounded, one line" rule as the Explore Session lines
+// above — these describe Your Groove's own four sections.
+
+export function contactTrendSummaryLine(s) {
+  return `${Math.round(s.strike.solid.pct)}% solid overall`;
+}
+
+export function directionFanSummaryLine(s) {
+  return joinDots([
+    `${Math.round(s.direction.left.pct)}% Left`,
+    `${Math.round(s.direction.straight.pct)}% Straight`,
+    `${Math.round(s.direction.right.pct)}% Right`,
+  ]);
+}
+
+export function practiceBlocksSummaryLine(blocks) {
+  if (!blocks.length) return '';
+  const best = [...blocks].sort((a, b) => b.strike.solid.pct - a.strike.solid.pct)[0];
+  return `${blocks.length} block${blocks.length === 1 ? '' : 's'} · best ${Math.round(best.strike.solid.pct)}% Solid`;
+}
+
+// Purely a count of what's being compared — never a verdict ("aid X won"),
+// since the body below is deliberately non-causal too.
+export function clubAidCompareSummaryLine(clubs, aids) {
+  return joinDots([
+    clubs.length > 1 ? `${clubs.length} clubs` : null,
+    aids.length ? `${aids.length} training aid${aids.length === 1 ? '' : 's'}` : null,
+  ]);
+}
+
 // Wires the accordion: one section open at a time, all closed initially.
 // Height is measured rather than guessed so the transition lands exactly on
 // the content's real size; under prefers-reduced-motion the panels just
 // toggle with no animation at all.
-export function bindExploreAccordion(root) {
+export function bindExploreAccordion(root, { defaultOpenIndex } = {}) {
   const reduced = typeof window !== 'undefined' && window.matchMedia
     ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
     : false;
@@ -722,4 +950,11 @@ export function bindExploreAccordion(root) {
       else open(section, !reduced);
     });
   });
+
+  // Explore Session never passes this (every section starts collapsed
+  // there); Your Groove passes 0 so Solid Contact Trend opens immediately,
+  // unanimated — this is the page's initial state, not a user action.
+  if (defaultOpenIndex !== undefined && sections[defaultOpenIndex]) {
+    open(sections[defaultOpenIndex], false);
+  }
 }

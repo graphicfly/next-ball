@@ -2,7 +2,7 @@ import * as db from '../db.js';
 import {
   qs, qsa, fmtDate, fmtDateTime, fmtSetup, fmtSurface, fmtSwing, cap, focusList, escapeHtml, timingLineHtml,
   metricRowHtml, directionBarHtml, heightDistributionHtml, contactDistributionHtml, weatherIconHtml, drillSectionHtml,
-  trainingAidSectionHtml,
+  trainingAidSectionHtml, toast,
 } from '../ui.js';
 import { sessionSummary, strikeBreakdown, clubSummaryLabel } from '../stats.js';
 import { getComparisonContext } from '../sessionAnalysis.js';
@@ -10,10 +10,10 @@ import {
   comparisonSectionHtml, bestWindowSectionHtml, bestWindowComparisonSectionHtml,
   targetAccuracySectionHtml, streaksSectionHtml, distanceDetailHtml,
   shotTimelineHtml, timelineLegendHtml, bindShotTimeline, blocksFlowHtml, firstLastCompactHtml,
-  conditionsGroupHtml, groupTitleHtml,
+  conditionsGroupHtml, groupTitleHtml, yourGrooveRowHtml,
 } from '../summarySections.js';
 import { downloadSessionCSV } from '../export.js';
-import { startEditShotDraft, setFlowReturn } from '../state.js';
+import { startEditShotDraft, setFlowReturn, setGrooveReturn } from '../state.js';
 import { openDeleteConfirmSheet } from './history.js';
 import { openLocationSheet } from './locationSheet.js';
 
@@ -29,6 +29,13 @@ export function renderHistoryDetail(root, sessionId) {
 
   const shotsHtml = shots.length ? shots.map((shot) => `
     <div class="shot-row" data-shot-id="${shot.shot_id}">
+      <span class="shot-row-check" aria-hidden="true">
+        <svg viewBox="0 0 20 20">
+          <circle class="check-ring" cx="10" cy="10" r="8"></circle>
+          <circle class="check-fill" cx="10" cy="10" r="8"></circle>
+          <path class="check-mark" d="M6 10.2l2.6 2.6L14 7"></path>
+        </svg>
+      </span>
       <div class="n">#${shot.shot_number}</div>
       <div class="tags">
         <span class="tag">${cap(shot.strike)}</span>
@@ -70,11 +77,12 @@ export function renderHistoryDetail(root, sessionId) {
     <div class="screen">
       <div class="topbar">
         <button class="back" id="backBtn">&larr; History</button>
-        <span class="screen-title">Session Detail</span>
-        <span class="side-space"></span>
+        <span class="screen-title" id="detailScreenTitle">Session Detail</span>
+        ${shots.length ? '<button class="back" id="enterSelectBtn">Edit</button>' : '<span class="side-space"></span>'}
       </div>
       <div class="scroll">
-        <div class="tiny muted" style="margin-bottom:var(--space-1);">${fmtDate(session.date)} &bull; ${s.total} balls &bull; ${escapeHtml(clubSummaryLabel(shots, session.default_club))} &bull; ${fmtSetup(session.default_setup)} &bull; ${fmtSurface(session.default_surface)} &bull; ${fmtSwing(session.default_swing)}${session.temperature_f != null ? ' &bull; ' + session.temperature_f + '&deg;F' : ''}</div>
+        <div class="tiny muted" id="editShotsIntro" style="margin-bottom:var(--space-2);" hidden>Select shots to correct their club, setup, drill, or other context together — strike, direction, height, and distance still edit one at a time.</div>
+        <div class="tiny muted" id="sessionMetaLine" style="margin-bottom:var(--space-1);">${fmtDate(session.date)} &bull; ${s.total} balls &bull; ${escapeHtml(clubSummaryLabel(shots, session.default_club))} &bull; ${fmtSetup(session.default_setup)} &bull; ${fmtSurface(session.default_surface)} &bull; ${fmtSwing(session.default_swing)}${session.temperature_f != null ? ' &bull; ' + session.temperature_f + '&deg;F' : ''}</div>
         ${focusList(session.practice_focus).length ? `<div class="tiny muted">Focus: ${focusList(session.practice_focus).join(', ')}</div>` : ''}
         ${session.session_notes ? `<div class="tiny" style="margin-top:var(--space-2);">${session.session_notes}</div>` : ''}
         ${timingLineHtml(s.timing)}
@@ -128,9 +136,16 @@ export function renderHistoryDetail(root, sessionId) {
 
         <details class="section-details" style="margin-top:var(--space-6);">
           <summary class="section-title">All Shots</summary>
-          <div class="tiny muted" style="margin-bottom:var(--space-2);">Tap a shot to edit it &middot; tap any tag (club, target, drill, aid) to correct it.</div>
-          <div class="card">${shotsHtml}</div>
+          <div class="tiny muted" style="margin-bottom:var(--space-2);">Tap a shot to edit it &middot; tap any tag (club, target, drill, aid) to correct it &middot; long-press to select multiple.</div>
+          <div class="batch-select-controls" id="batchSelectControls" hidden>
+            <button class="batch-filter-tab active" id="filterAllBtn" data-filter="all">All</button>
+            <button class="batch-filter-tab" id="filterSelectedBtn" data-filter="selected">Selected (<span id="selectedCountLabel">0</span>)</button>
+            <button class="batch-delete-link" id="batchDeleteLink">Delete</button>
+          </div>
+          <div class="card shots-list" id="shotsListCard">${shotsHtml}</div>
         </details>
+
+        <div style="margin-top:var(--space-5);">${yourGrooveRowHtml()}</div>
       </div>
 
       <button class="btn" id="exportBtn" style="margin-top:var(--space-3);">Export CSV</button>
@@ -141,10 +156,13 @@ export function renderHistoryDetail(root, sessionId) {
 
   bindShotTimeline(root, shots);
 
-  qs('#backBtn', root).addEventListener('click', () => { location.hash = '#/history'; });
   qs('#exportBtn', root).addEventListener('click', () => { downloadSessionCSV(sessionId); });
   qs('#changeLocationBtn', root).addEventListener('click', () => {
     openLocationSheet(session, () => renderHistoryDetail(root, sessionId));
+  });
+  qs('#viewYourGrooveBtn', root)?.addEventListener('click', () => {
+    setGrooveReturn(`#/history/${sessionId}`);
+    location.hash = `#/groove/${sessionId}`;
   });
   qs('#deleteSessionBtn', root).addEventListener('click', () => {
     // Reuses History's own confirmation sheet (same dialog either way) —
@@ -154,10 +172,164 @@ export function renderHistoryDetail(root, sessionId) {
     openDeleteConfirmSheet(session, root, () => { location.hash = '#/history'; });
   });
 
-  qsa('.shot-row', root).forEach((row) => {
+  // ---------- Batch edit / Edit Shots (docs/ux-spec.md §3.10/§4.8, Reference A) ----------
+  // A mode of this same shot list, not a new route or a parallel editor —
+  // context fields batch-edit through the exact sheets defined below
+  // (openBatchFieldSheet -> a per-field value sheet -> a confirm sheet with
+  // an exact count), while a plain tap/tag-tap still edits one shot the
+  // normal way outside selection mode. Strike/Direction/Height/Distance
+  // stay individually-editable only — see §3.10's table — so they never
+  // appear in the batch field list at all.
+  let selecting = false;
+  let filterMode = 'all'; // 'all' | 'selected' — the All/Selected(n) view toggle
+  const selected = new Set();
+  let anchorShotId = null;
+  const listCard = qs('#shotsListCard', root);
+
+  function applyFilter() {
+    qsa('.shot-row', listCard).forEach((row) => {
+      row.hidden = filterMode === 'selected' && !selected.has(row.dataset.shotId);
+    });
+  }
+
+  function updateSelectionChrome() {
+    const count = selected.size;
+    qs('#selectedCountLabel', root).textContent = String(count);
+    qs('#batchFooterCount', root).textContent = `${count} shot${count === 1 ? '' : 's'} selected`;
+    const editBtn = qs('#batchEditFieldBtn', root);
+    editBtn.disabled = count === 0;
+    editBtn.textContent = count ? `Edit ${count} Shot${count === 1 ? '' : 's'}` : 'Edit Shots';
+    if (filterMode === 'selected') applyFilter();
+  }
+
+  function setRowSelected(shotId, isSelected) {
+    if (isSelected) selected.add(shotId); else selected.delete(shotId);
+    listCard.querySelector(`.shot-row[data-shot-id="${shotId}"]`)?.classList.toggle('selected', isSelected);
+  }
+
+  function selectRange(fromId, toId) {
+    const i1 = shots.findIndex((s) => s.shot_id === fromId);
+    const i2 = shots.findIndex((s) => s.shot_id === toId);
+    if (i1 === -1 || i2 === -1) return;
+    const [lo, hi] = i1 <= i2 ? [i1, i2] : [i2, i1];
+    for (let i = lo; i <= hi; i++) setRowSelected(shots[i].shot_id, true);
+    updateSelectionChrome();
+  }
+
+  function setFilterMode(mode) {
+    filterMode = mode;
+    qs('#filterAllBtn', root).classList.toggle('active', mode === 'all');
+    qs('#filterSelectedBtn', root).classList.toggle('active', mode === 'selected');
+    applyFilter();
+  }
+
+  function enterSelecting(firstShotId) {
+    selecting = true;
+    selected.clear();
+    anchorShotId = firstShotId ?? null;
+    listCard.classList.add('selecting');
+    qs('#backBtn', root).textContent = 'Cancel';
+    qs('#detailScreenTitle', root).textContent = 'Edit Shots';
+    qs('#editShotsIntro', root).hidden = false;
+    qs('#enterSelectBtn', root) && (qs('#enterSelectBtn', root).hidden = true);
+    qs('#batchSelectControls', root).hidden = false;
+    const detailsEl = listCard.closest('details');
+    if (detailsEl) detailsEl.open = true;
+    setFilterMode('all');
+    if (!qs('#batchActionBar', root)) {
+      qs('.screen', root).appendChild(buildBatchActionBar());
+      wireBatchActionBar();
+    }
+    if (firstShotId) setRowSelected(firstShotId, true);
+    updateSelectionChrome();
+  }
+
+  function exitSelecting() {
+    selecting = false;
+    selected.clear();
+    anchorShotId = null;
+    filterMode = 'all';
+    listCard.classList.remove('selecting');
+    qsa('.shot-row', listCard).forEach((r) => { r.classList.remove('selected'); r.hidden = false; });
+    qs('#backBtn', root).textContent = '← History';
+    qs('#detailScreenTitle', root).textContent = 'Session Detail';
+    qs('#editShotsIntro', root).hidden = true;
+    qs('#enterSelectBtn', root) && (qs('#enterSelectBtn', root).hidden = false);
+    qs('#batchSelectControls', root).hidden = true;
+    qs('#batchActionBar', root)?.remove();
+  }
+
+  function buildBatchActionBar() {
+    const bar = document.createElement('div');
+    bar.className = 'batch-action-bar';
+    bar.id = 'batchActionBar';
+    bar.innerHTML = `
+      <div>
+        <div class="batch-footer-count" id="batchFooterCount">0 shots selected</div>
+        <div class="batch-footer-note">Only the field you choose will be updated — everything else stays as logged.</div>
+      </div>
+      <div class="batch-footer-buttons">
+        <button class="btn btn-outline" id="batchCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="batchEditFieldBtn" disabled>Edit Shots</button>
+      </div>
+    `;
+    return bar;
+  }
+
+  function wireBatchActionBar() {
+    qs('#batchCancelBtn', root).addEventListener('click', exitSelecting);
+    qs('#batchEditFieldBtn', root).addEventListener('click', () => {
+      if (!selected.size) return;
+      const chosen = shots.filter((s) => selected.has(s.shot_id));
+      openBatchFieldSheet(chosen, sessionId, () => renderHistoryDetail(root, sessionId));
+    });
+  }
+
+  qs('#backBtn', root).addEventListener('click', () => {
+    if (selecting) { exitSelecting(); return; }
+    location.hash = '#/history';
+  });
+
+  qs('#enterSelectBtn', root)?.addEventListener('click', () => enterSelecting());
+
+  qs('#filterAllBtn', root).addEventListener('click', () => setFilterMode('all'));
+  qs('#filterSelectedBtn', root).addEventListener('click', () => setFilterMode('selected'));
+  qs('#batchDeleteLink', root).addEventListener('click', () => {
+    if (!selected.size) { toast('Select at least one shot'); return; }
+    openBatchDeleteSheet(Array.from(selected), sessionId, () => renderHistoryDetail(root, sessionId));
+  });
+
+  qsa('.shot-row', listCard).forEach((row) => {
+    const shotId = row.dataset.shotId;
+    let pressTimer = null;
+    let longPressFired = false;
+
+    row.addEventListener('pointerdown', () => {
+      longPressFired = false;
+      pressTimer = setTimeout(() => {
+        longPressFired = true;
+        if (!selecting) { enterSelecting(shotId); return; }
+        if (anchorShotId && anchorShotId !== shotId) { selectRange(anchorShotId, shotId); return; }
+        setRowSelected(shotId, !selected.has(shotId));
+        anchorShotId = shotId;
+        updateSelectionChrome();
+      }, 500);
+    });
+    const clearPressTimer = () => clearTimeout(pressTimer);
+    row.addEventListener('pointerup', clearPressTimer);
+    row.addEventListener('pointerleave', clearPressTimer);
+    row.addEventListener('pointercancel', clearPressTimer);
+
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.tag-drill')) return; // handled separately below
-      const shotId = row.dataset.shotId;
+      if (longPressFired) { longPressFired = false; return; } // long-press already acted on this tap
+      if (selecting) {
+        if (e.shiftKey && anchorShotId) { selectRange(anchorShotId, shotId); return; }
+        setRowSelected(shotId, !selected.has(shotId));
+        anchorShotId = shotId;
+        updateSelectionChrome();
+        return;
+      }
+      if (e.target.closest('.tag-drill,.tag-aid,.tag-setup,.tag-target')) return; // handled separately below
       const shot = shots.find((s) => s.shot_id === shotId);
       if (!shot) return;
       startEditShotDraft(shot);
@@ -168,6 +340,7 @@ export function renderHistoryDetail(root, sessionId) {
 
   qsa('.tag-drill', root).forEach((tag) => {
     tag.addEventListener('click', (e) => {
+      if (selecting) return; // let the tap bubble to the row's own selection handling
       e.stopPropagation();
       const shotId = tag.dataset.editDrill;
       const shot = shots.find((s) => s.shot_id === shotId);
@@ -178,6 +351,7 @@ export function renderHistoryDetail(root, sessionId) {
 
   qsa('.tag-aid', root).forEach((tag) => {
     tag.addEventListener('click', (e) => {
+      if (selecting) return;
       e.stopPropagation();
       const shotId = tag.dataset.editAid;
       const shot = shots.find((s) => s.shot_id === shotId);
@@ -188,6 +362,7 @@ export function renderHistoryDetail(root, sessionId) {
 
   qsa('.tag-setup', root).forEach((tag) => {
     tag.addEventListener('click', (e) => {
+      if (selecting) return;
       e.stopPropagation();
       const shotId = tag.dataset.editSetup;
       const shot = shots.find((s) => s.shot_id === shotId);
@@ -198,6 +373,7 @@ export function renderHistoryDetail(root, sessionId) {
 
   qsa('.tag-target', root).forEach((tag) => {
     tag.addEventListener('click', (e) => {
+      if (selecting) return;
       e.stopPropagation();
       const shotId = tag.dataset.editTarget;
       const shot = shots.find((s) => s.shot_id === shotId);
@@ -394,5 +570,234 @@ export function openShotTargetSheet(shot, onDone) {
     const value = Number(qs('#customTargetInput', backdrop).value);
     if (!value || value < 1) { return; }
     applyTarget(value);
+  });
+}
+
+// ---------- Batch edit sheets (docs/ux-spec.md §3.10) ----------
+// Only the seven CONTEXT fields ever appear here — Strike/Direction/Height/
+// Distance are the record of what the ball actually did, and bulk-rewriting
+// them would falsify the log (and corrupt Groove Score, which reads strike
+// directly). Non-batchable fields simply never appear in this list, rather
+// than showing as disabled rows.
+const BATCH_FIELDS = [
+  { key: 'club', label: 'Club' },
+  { key: 'swing_length', label: 'Swing Length' },
+  { key: 'setup', label: 'Setup' },
+  { key: 'surface', label: 'Surface' },
+  { key: 'drill', label: 'Drill' },
+  { key: 'training_aid', label: 'Training Aid' },
+  { key: 'target_distance_yards', label: 'Target' },
+];
+
+export function openBatchFieldSheet(shots, sessionId, onDone) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <h2>Edit Field &mdash; ${shots.length} shot${shots.length === 1 ? '' : 's'}</h2>
+      <div class="choice-grid wrap-2">
+        ${BATCH_FIELDS.map((f) => `<div class="choice-btn" data-field="${f.key}">${f.label}</div>`).join('')}
+      </div>
+      <button class="btn btn-outline" id="closeBatchFieldBtn" style="margin-top:8px;">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  qs('#closeBatchFieldBtn', backdrop).addEventListener('click', () => backdrop.remove());
+
+  qsa('.choice-btn', backdrop).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      backdrop.remove();
+      openBatchValueSheet(btn.dataset.field, shots, sessionId, onDone);
+    });
+  });
+}
+
+// One-field-per-operation confirm — always states the exact count being
+// changed ("Change Club to GW for 4 shots?"), never a silent bulk write.
+function openBatchConfirmSheet(fieldLabel, valueLabel, patch, shots, sessionId, onDone) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <h2>Change ${escapeHtml(fieldLabel)} to ${escapeHtml(String(valueLabel))} for ${shots.length} shot${shots.length === 1 ? '' : 's'}?</h2>
+      <div class="stack">
+        <button class="btn btn-outline" id="cancelBatchConfirmBtn">Cancel</button>
+        <button class="btn btn-primary" id="confirmBatchEditBtn">Confirm</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  qs('#cancelBatchConfirmBtn', backdrop).addEventListener('click', () => backdrop.remove());
+  qs('#confirmBatchEditBtn', backdrop).addEventListener('click', () => {
+    db.updateShots(sessionId, shots.map((s) => s.shot_id), patch);
+    backdrop.remove();
+    onDone();
+  });
+}
+
+function openBatchChoiceValueSheet(fieldKey, fieldLabel, options, shots, sessionId, onDone, gridClass = '') {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <h2>${escapeHtml(fieldLabel)} &mdash; ${shots.length} shot${shots.length === 1 ? '' : 's'}</h2>
+      <div class="choice-grid ${gridClass}">
+        ${options.map((o) => `<div class="choice-btn" data-value="${o.value}">${escapeHtml(o.label)}</div>`).join('')}
+      </div>
+      <button class="btn btn-outline" id="closeBatchValueBtn" style="margin-top:8px;">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  qs('#closeBatchValueBtn', backdrop).addEventListener('click', () => backdrop.remove());
+
+  qsa('.choice-btn', backdrop).forEach((btn) => {
+    const chosen = options.find((o) => String(o.value) === btn.dataset.value);
+    btn.addEventListener('click', () => {
+      backdrop.remove();
+      openBatchConfirmSheet(fieldLabel, chosen.label, { [fieldKey]: chosen.value }, shots, sessionId, onDone);
+    });
+  });
+}
+
+function openBatchDrillValueSheet(shots, sessionId, onDone) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <h2>Drill &mdash; ${shots.length} shot${shots.length === 1 ? '' : 's'}</h2>
+      <div class="choice-grid wrap-2">
+        ${db.DRILLS.map((d) => `<div class="choice-btn" data-value="${d}">${d}</div>`).join('')}
+        <div class="choice-btn" data-value="__custom__">Custom</div>
+      </div>
+      <div id="customBatchDrillWrap" style="display:none; margin-top:12px;">
+        <input type="text" id="customBatchDrillInput" placeholder="Drill name" maxlength="30" />
+        <button class="btn btn-primary" id="setCustomBatchDrillBtn" style="margin-top:8px;">Set Drill</button>
+      </div>
+      <button class="btn btn-outline" id="closeBatchDrillBtn" style="margin-top:8px;">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  qs('#closeBatchDrillBtn', backdrop).addEventListener('click', () => backdrop.remove());
+
+  qsa('.choice-btn', backdrop).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.value === '__custom__') {
+        qs('#customBatchDrillWrap', backdrop).style.display = 'block';
+        qs('#customBatchDrillInput', backdrop).focus();
+        return;
+      }
+      backdrop.remove();
+      openBatchConfirmSheet('Drill', btn.dataset.value, { drill: btn.dataset.value }, shots, sessionId, onDone);
+    });
+  });
+
+  qs('#setCustomBatchDrillBtn', backdrop).addEventListener('click', () => {
+    const name = qs('#customBatchDrillInput', backdrop).value.trim();
+    if (!name) return;
+    backdrop.remove();
+    openBatchConfirmSheet('Drill', name, { drill: name }, shots, sessionId, onDone);
+  });
+}
+
+function openBatchTargetValueSheet(shots, sessionId, onDone) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet">
+      <h2>Target &mdash; ${shots.length} shot${shots.length === 1 ? '' : 's'}</h2>
+      <div class="choice-grid wrap-4">
+        <div class="choice-btn" data-value="__off__">Off</div>
+        ${db.TARGET_DISTANCE_PRESETS.map((d) => `<div class="choice-btn" data-value="${d}">${d}</div>`).join('')}
+        <div class="choice-btn" data-value="__custom__">Custom</div>
+      </div>
+      <div id="customBatchTargetWrap" style="display:none; margin-top:12px;">
+        <input type="number" id="customBatchTargetInput" placeholder="Yards" min="1" max="500" />
+        <button class="btn btn-primary" id="setCustomBatchTargetBtn" style="margin-top:8px;">Set Target</button>
+      </div>
+      <button class="btn btn-outline" id="closeBatchTargetBtn" style="margin-top:8px;">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  qs('#closeBatchTargetBtn', backdrop).addEventListener('click', () => backdrop.remove());
+
+  qsa('.choice-btn', backdrop).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.value === '__custom__') {
+        qs('#customBatchTargetWrap', backdrop).style.display = 'block';
+        qs('#customBatchTargetInput', backdrop).focus();
+        return;
+      }
+      backdrop.remove();
+      if (btn.dataset.value === '__off__') {
+        openBatchConfirmSheet('Target', 'Off', { target_distance_yards: null }, shots, sessionId, onDone);
+        return;
+      }
+      const value = Number(btn.dataset.value);
+      openBatchConfirmSheet('Target', `${value} yd`, { target_distance_yards: value }, shots, sessionId, onDone);
+    });
+  });
+
+  qs('#setCustomBatchTargetBtn', backdrop).addEventListener('click', () => {
+    const value = Number(qs('#customBatchTargetInput', backdrop).value);
+    if (!value || value < 1) return;
+    backdrop.remove();
+    openBatchConfirmSheet('Target', `${value} yd`, { target_distance_yards: value }, shots, sessionId, onDone);
+  });
+}
+
+function openBatchValueSheet(fieldKey, shots, sessionId, onDone) {
+  if (fieldKey === 'club') {
+    return openBatchChoiceValueSheet(fieldKey, 'Club', db.CLUBS.map((c) => ({ value: c, label: c })), shots, sessionId, onDone, 'wrap-4');
+  }
+  if (fieldKey === 'swing_length') {
+    return openBatchChoiceValueSheet(fieldKey, 'Swing Length', [
+      { value: 'half', label: 'Half' }, { value: 'three-quarter', label: '3/4' }, { value: 'full', label: 'Full' },
+    ], shots, sessionId, onDone);
+  }
+  if (fieldKey === 'setup') {
+    return openBatchChoiceValueSheet(fieldKey, 'Setup', [
+      { value: 'ground', label: 'Ground' }, { value: 'tee', label: 'Tee' },
+    ], shots, sessionId, onDone, 'wrap-2');
+  }
+  if (fieldKey === 'surface') {
+    return openBatchChoiceValueSheet(fieldKey, 'Surface', [
+      { value: 'mat', label: 'Mat' }, { value: 'grass', label: 'Grass' },
+    ], shots, sessionId, onDone, 'wrap-2');
+  }
+  if (fieldKey === 'training_aid') {
+    return openBatchChoiceValueSheet(fieldKey, 'Training Aid', db.TRAINING_AIDS.map((a) => ({ value: a, label: db.TRAINING_AID_LABELS[a] })), shots, sessionId, onDone, 'wrap-2');
+  }
+  if (fieldKey === 'drill') return openBatchDrillValueSheet(shots, sessionId, onDone);
+  if (fieldKey === 'target_distance_yards') return openBatchTargetValueSheet(shots, sessionId, onDone);
+}
+
+// Destructive — the one place red fills a whole sheet surface (§3.10),
+// distinct from the plain confirm sheet openBatchConfirmSheet uses for
+// non-destructive field edits.
+export function openBatchDeleteSheet(shotIds, sessionId, onDone) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet sheet-danger">
+      <h2>Delete ${shotIds.length} shot${shotIds.length === 1 ? '' : 's'}?</h2>
+      <p class="tiny muted" style="margin-bottom:var(--space-4);">This can&rsquo;t be undone.</p>
+      <div class="stack">
+        <button class="btn btn-outline" id="cancelBatchDeleteBtn">Cancel</button>
+        <button class="btn btn-danger" id="confirmBatchDeleteBtn">Delete ${shotIds.length} Shot${shotIds.length === 1 ? '' : 's'}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  qs('#cancelBatchDeleteBtn', backdrop).addEventListener('click', () => backdrop.remove());
+  qs('#confirmBatchDeleteBtn', backdrop).addEventListener('click', () => {
+    db.deleteShots(sessionId, shotIds);
+    backdrop.remove();
+    onDone();
   });
 }

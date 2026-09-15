@@ -50,3 +50,16 @@ export function setFlowReturn(hash) {
 export function getFlowReturn() {
   return flowReturnHash;
 }
+
+// Same idea for Your Groove's back button (docs/ux-spec.md §4.7: "a
+// ← Explore Session back button") — Explore Session isn't its own route
+// (it's a client-side layer toggle inside Session Summary, or the whole of
+// History Detail), so the screen that opened Your Groove records exactly
+// where "back" should land.
+let grooveReturnHash = '#/history';
+export function setGrooveReturn(hash) {
+  grooveReturnHash = hash;
+}
+export function getGrooveReturn() {
+  return grooveReturnHash;
+}
