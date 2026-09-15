@@ -1260,6 +1260,12 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 .batch-footer-buttons { display: flex; gap: var(--space-3); }
 .batch-footer-buttons .btn { flex: 1; }
 
+/* Compensates the scrollable list for .batch-action-bar's fixed height
+   while selecting — without this, the last shot row(s) in a long session
+   end up permanently hidden behind the footer with no way to scroll
+   further to reveal them. */
+.scroll.has-batch-footer { padding-bottom: calc(var(--safe-bottom) + 140px); }
+
 /* The one place a red fill covers a whole surface (§3.10) — reserved for
    the batch-delete confirmation only; every other destructive control in
    the app stays an outline/text treatment until this exact moment. */
@@ -2034,6 +2040,12 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   padding: var(--space-4) var(--space-5);
   margin-bottom: var(--space-5);
 }
+/* The goal-evaluation variant (Continue/Set New Goal/Dismiss stacked below
+   the headline) makes this card much taller than the plain 2-line case —
+   align-items:center would center the icon against that full height,
+   floating it away from the headline it belongs beside, so it pins to the
+   top instead whenever those actions are present. */
+.insight-card.has-actions { align-items: flex-start; }
 .insight-icon {
   width: 38px;
   height: 38px;

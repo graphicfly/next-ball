@@ -151,23 +151,24 @@ export function renderHome(root) {
   qs('#resumeBtn', root)?.addEventListener('click', () => { location.hash = '#/active'; });
   qs('#editSetupBtn', root)?.addEventListener('click', () => { location.hash = '#/start'; });
   qs('#lastSessionRow', root)?.addEventListener('click', () => { location.hash = `#/history/${recent.session_id}`; });
-  qs('#endSessionBtn', root)?.addEventListener('click', () => openEndSessionSheet(activeSession, root));
+  qs('#endSessionBtn', root)?.addEventListener('click', () => openEndSessionSheet(activeSession, () => renderHome(root)));
 }
 
-// Ending/discarding from Home deliberately reuses the exact same
-// finalization Active screen's own End Session uses (db.finishSession +
-// wake-lock/weather cleanup) — this is not a competing implementation.
-// Zero-shot sessions additionally go through the existing deleteSession()
-// (built for History's Delete Session feature), which already refuses to
-// delete an active/paused session as a safety guard; finishing first
-// satisfies that guard cleanly rather than weakening it, so a 0-shot
-// session never lingers as a visible empty History entry.
+// Shared by Home, Active, and Shot Entry — the single place "end/discard a
+// session" is implemented, so every entry point gets the same confirmation
+// and the same zero-shot cleanup. Zero-shot sessions go through the
+// existing deleteSession() (built for History's Delete Session feature),
+// which already refuses to delete an active/paused session as a safety
+// guard; finishing first satisfies that guard cleanly rather than
+// weakening it, so a 0-shot session never lingers as a visible empty
+// History entry with fabricated 0% metrics.
 //
-// Per explicit product decision: ending from Home stays on Home afterward
-// (does NOT route through Session Check-In/Summary) — the user explicitly
-// chose to end from Home, and check-in is a skippable ratings-only step
-// with no other side effects, so nothing is lost by skipping it here.
-function openEndSessionSheet(session, homeRoot) {
+// `onDone(zeroShot)` runs after the session is finished (and, if zeroShot,
+// deleted) — callers decide where to go next: Home stays on Home (ending
+// from Home is an explicit choice, and Check-In has nothing else to offer
+// here), while Active/Shot Entry route to Check-In for a real session or
+// straight back to Home for a discarded one.
+export function openEndSessionSheet(session, onDone) {
   const shots = db.getShotsForSession(session.session_id);
   const zeroShot = shots.length === 0;
   const title = zeroShot ? 'Discard this session?' : 'End this session?';
@@ -209,6 +210,6 @@ function openEndSessionSheet(session, homeRoot) {
     disableWakeLock();
     stopWeatherTracking();
     close();
-    renderHome(homeRoot);
+    onDone(zeroShot);
   });
 }

@@ -41,8 +41,8 @@ export function renderHistory(root) {
           </div>
         </div>
         ${metricRowHtml([
-          { value: s.strike.solid.pct + '%', label: 'Solid' },
-          { value: s.direction.straight.pct + '%', label: 'Straight' },
+          { value: Math.round(s.strike.solid.pct) + '%', label: 'Solid' },
+          { value: Math.round(s.direction.straight.pct) + '%', label: 'Straight' },
           { value: s.distance.medianSolid != null ? s.distance.medianSolid + ' yd' : '—', label: 'Median Solid' },
         ], 'md')}
         ${(() => {

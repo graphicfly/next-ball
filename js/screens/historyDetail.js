@@ -89,8 +89,8 @@ export function renderHistoryDetail(root, sessionId) {
 
         <div style="margin-top:var(--space-6);"></div>
         ${metricRowHtml([
-          { value: s.strike.solid.pct + '%', label: 'Solid' },
-          { value: s.direction.straight.pct + '%', label: 'Straight' },
+          { value: Math.round(s.strike.solid.pct) + '%', label: 'Solid' },
+          { value: Math.round(s.direction.straight.pct) + '%', label: 'Straight' },
           { value: s.distance.medianSolid != null ? s.distance.medianSolid + ' yd' : '—', label: 'Median Solid' },
         ])}
 
@@ -185,6 +185,7 @@ export function renderHistoryDetail(root, sessionId) {
   const selected = new Set();
   let anchorShotId = null;
   const listCard = qs('#shotsListCard', root);
+  const scrollEl = qs('.scroll', root);
 
   function applyFilter() {
     qsa('.shot-row', listCard).forEach((row) => {
@@ -240,6 +241,7 @@ export function renderHistoryDetail(root, sessionId) {
       qs('.screen', root).appendChild(buildBatchActionBar());
       wireBatchActionBar();
     }
+    scrollEl.classList.add('has-batch-footer');
     if (firstShotId) setRowSelected(firstShotId, true);
     updateSelectionChrome();
   }
@@ -257,6 +259,7 @@ export function renderHistoryDetail(root, sessionId) {
     qs('#enterSelectBtn', root) && (qs('#enterSelectBtn', root).hidden = false);
     qs('#batchSelectControls', root).hidden = true;
     qs('#batchActionBar', root)?.remove();
+    scrollEl.classList.remove('has-batch-footer');
   }
 
   function buildBatchActionBar() {

@@ -515,7 +515,7 @@ export function goalEvaluationCardHtml(evaluation, { goalId, actions = false } =
 
   if (evaluation.outcome === 'met') {
     return `
-      <div class="insight-card">
+      <div class="insight-card${actions ? ' has-actions' : ''}">
         <span class="insight-icon">${insightIconHtml('star')}</span>
         <div class="next-goal-text">
           <div class="insight-headline">${escapeHtml(evaluation.headline)}</div>
@@ -526,7 +526,7 @@ export function goalEvaluationCardHtml(evaluation, { goalId, actions = false } =
   }
 
   return `
-    <div class="insight-card next-goal-card">
+    <div class="insight-card next-goal-card${actions ? ' has-actions' : ''}">
       <span class="insight-icon">${insightIconHtml('target')}</span>
       <div class="next-goal-text">
         <div class="next-goal-eyebrow">${escapeHtml(evaluation.headline)}</div>

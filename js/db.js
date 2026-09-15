@@ -969,7 +969,12 @@ export function importFullDB(obj) {
     // Older backups (pre-goal-persistence) simply have no `goals` key —
     // that's not a corrupt file, just data from before this existed.
     goals: Array.isArray(obj.goals) ? obj.goals : [],
-    settings: obj.settings || defaultIndex().settings,
+    // Merged (not `obj.settings || defaultIndex().settings`) so an empty or
+    // partial settings object — e.g. Settings' "Erase All Data" passing
+    // `{}` deliberately — still ends up with every default field rather
+    // than one that's merely truthy, which every reader here already
+    // assumes exists via its own `||` fallback.
+    settings: { ...defaultIndex().settings, ...(obj.settings && typeof obj.settings === 'object' ? obj.settings : {}) },
   };
   _shotsCache.clear();
   saveIndex();

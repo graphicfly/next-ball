@@ -111,22 +111,29 @@ export function renderTrends(root) {
     `;
 
     let bodyHtml;
+    if (!hasAnyFinished) {
+      // No filter pills for a first-time user — there's nothing yet to
+      // filter, and showing a full row of club/setup/surface/swing/metric
+      // controls above an empty state reads as premature complexity.
+      qs('#trendsBody', root).innerHTML = emptyStateHtml({
+        icon: 'trends',
+        title: 'Not enough data yet',
+        body: 'Finish a range session and your trends will start building here.',
+        actionLabel: 'Start Range Session',
+        actionId: 'emptyStartBtn',
+      });
+      qs('#emptyStartBtn', root)?.addEventListener('click', () => { location.hash = '#/start'; });
+      return;
+    }
+
     if (!points.length) {
-      bodyHtml = !hasAnyFinished
-        ? emptyStateHtml({
-            icon: 'trends',
-            title: 'Not enough data yet',
-            body: 'Finish a range session and your trends will start building here.',
-            actionLabel: 'Start Range Session',
-            actionId: 'emptyStartBtn',
-          })
-        : emptyStateHtml({
-            icon: 'trends',
-            title: 'No sessions match these filters',
-            body: 'Try a different club, setup, surface, or swing length.',
-            actionLabel: 'Clear Filters',
-            actionId: 'emptyClearFiltersBtn',
-          });
+      bodyHtml = emptyStateHtml({
+        icon: 'trends',
+        title: 'No sessions match these filters',
+        body: 'Try a different club, setup, surface, or swing length.',
+        actionLabel: 'Clear Filters',
+        actionId: 'emptyClearFiltersBtn',
+      });
     } else if (showTable) {
       bodyHtml = `
         <div style="overflow-x:auto;">

@@ -1,9 +1,7 @@
 import * as db from '../db.js';
 import { qs, qsa, cap, toast } from '../ui.js';
 import { getDraft, setDraftField, clearDraft, getFlowReturn } from '../state.js';
-import { disableWakeLock } from '../wakeLock.js';
-import { stopWeatherTracking } from '../sessionWeather.js';
-import { finalizeSessionGoal } from '../sessionAnalysis.js';
+import { openEndSessionSheet } from './home.js';
 
 const ICON_FLAG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4.5h12l-3 4 3 4H6"/></svg>';
 
@@ -349,15 +347,13 @@ export function renderShotEntry(root, step) {
   });
 
   qs('#endSessionBtn', root)?.addEventListener('click', () => {
-    // Same underlying action as Active Session's End Session — no
-    // confirmation step, matching that screen. Whatever shot was mid-entry
-    // is discarded, same as Cancel; there's no partial-shot save to lose.
-    clearDraft();
-    db.finishSession(activeSession.session_id);
-    finalizeSessionGoal(activeSession.session_id);
-    disableWakeLock();
-    stopWeatherTracking();
-    location.hash = `#/checkin/${activeSession.session_id}`;
+    // Same shared confirm/discard flow as Active and Home. Whatever shot
+    // was mid-entry is discarded once confirmed, same as Cancel — there's
+    // no partial-shot save to lose.
+    openEndSessionSheet(activeSession, (zeroShot) => {
+      clearDraft();
+      location.hash = zeroShot ? '#/home' : `#/checkin/${activeSession.session_id}`;
+    });
   });
 
   qs('#enterCustomBtn', root)?.addEventListener('click', () => openCustomDistanceSheet(session, draft, root));
@@ -474,10 +470,19 @@ function finishShot(session, draft, root) {
   showSavedFlash(() => { location.hash = returnTo; });
 }
 
+// Module-level so a shot logged in quick succession (before the previous
+// flash's own dismissal timer fired) cancels that stale timer instead of
+// racing it — otherwise the earlier timeout's classList.remove(...) /
+// navigation could interleave with the new flash, leaving `.show` stuck on
+// indefinitely.
+let savedFlashTimer = null;
+
 function showSavedFlash(callback) {
   // A brief tick on save, mirroring the visual confirmation — never throws
   // on browsers without the Vibration API (notably iOS Safari).
   if (navigator.vibrate) navigator.vibrate(15);
+
+  if (savedFlashTimer) { clearTimeout(savedFlashTimer); savedFlashTimer = null; }
 
   let node = document.getElementById('savedFlash');
   if (!node) {
@@ -487,8 +492,10 @@ function showSavedFlash(callback) {
     node.innerHTML = '<div class="txt">&#10003; Saved</div>';
     document.body.appendChild(node);
   }
-  requestAnimationFrame(() => node.classList.add('show'));
-  setTimeout(() => {
+  node.classList.remove('show');
+  requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add('show')));
+  savedFlashTimer = setTimeout(() => {
+    savedFlashTimer = null;
     node.classList.remove('show');
     callback();
   }, 380);

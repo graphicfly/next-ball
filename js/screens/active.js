@@ -4,9 +4,9 @@ import { startNewShotDraft, startEditShotDraft, setFlowReturn } from '../state.j
 import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking, refreshWeatherNow, isFetchingWeather } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
-import { finalizeSessionGoal } from '../sessionAnalysis.js';
 import { openLocationSheet } from './locationSheet.js';
 import { openShotDrillSheet, openShotTrainingAidSheet, openShotSetupSheet, openShotTargetSheet } from './historyDetail.js';
+import { openEndSessionSheet } from './home.js';
 
 // Registered once at module load (not per-render) so a background weather
 // update re-renders the screen if — and only if — it's the one showing.
@@ -274,11 +274,9 @@ export function renderActive(root) {
   });
 
   qs('#finishBtn', root).addEventListener('click', () => {
-    db.finishSession(session.session_id);
-    finalizeSessionGoal(session.session_id);
-    disableWakeLock();
-    stopWeatherTracking();
-    location.hash = `#/checkin/${session.session_id}`;
+    openEndSessionSheet(session, (zeroShot) => {
+      location.hash = zeroShot ? '#/home' : `#/checkin/${session.session_id}`;
+    });
   });
 
   qs('#clubItem', root).addEventListener('click', () => openClubOnlySheet(root, session));

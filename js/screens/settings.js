@@ -74,8 +74,8 @@ export function renderSettings(root) {
         <div class="kv-row" style="margin-bottom:var(--space-4);"><span class="muted">Stored on this device</span><b>${allSessions.length} sessions &bull; ${allShots.length} shots</b></div>
 
         <div class="stack" style="margin-bottom:var(--space-5);">
-          <button class="btn" id="exportCsvBtn">Export All Shots (CSV)</button>
-          <button class="btn" id="exportJsonBtn">Full Backup (JSON)</button>
+          <button class="btn" id="exportCsvBtn" ${allShots.length ? '' : 'disabled'}>Export All Shots (CSV)</button>
+          <button class="btn" id="exportJsonBtn" ${allSessions.length ? '' : 'disabled'}>Full Backup (JSON)</button>
           <button class="btn" id="importBtn">Restore from JSON Backup</button>
           <input type="file" id="importFile" accept="application/json" style="display:none;" />
         </div>
