@@ -1,8 +1,7 @@
 import * as db from '../db.js';
 import { qs, qsa, toast, applyTheme } from '../ui.js';
 import { downloadAllCSV, downloadJSONBackup, importJSONBackupFile } from '../export.js';
-
-const APP_VERSION = '1.0.0';
+import { BUILD_VERSION } from '../version.js';
 const THEME_OPTIONS = [
   { value: 'system', label: 'System' },
   { value: 'dark', label: 'Dark' },
@@ -94,7 +93,7 @@ export function renderSettings(root) {
         <div class="about-block">
           <h1 class="brand-hero">NEXT BALL</h1>
           <div class="brand-tagline">Find your groove.</div>
-          <div class="version">Version ${APP_VERSION}</div>
+          <div class="version">Build ${BUILD_VERSION}</div>
         </div>
         <p class="tiny center" style="margin-bottom:var(--space-4);">All data is stored only on this device. Next Ball works offline and does not use an account.</p>
       </div>

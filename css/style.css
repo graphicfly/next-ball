@@ -1384,6 +1384,8 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 
 /* ---------- About / brand block (Settings) ---------- */
 
+.home-build-tag { color: var(--color-text-tertiary); margin-top: var(--space-4); }
+
 .about-block { text-align: center; padding: var(--space-6) 0 var(--space-4); }
 .about-block .brand-hero { font-size: 1.75rem; }
 .about-block .brand-tagline { margin-bottom: var(--space-3); }

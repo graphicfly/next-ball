@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v49';
+const CACHE_NAME = 'nextball-v50';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const PRECACHE_URLS = [
   './js/app.js',
   './js/db.js',
   './js/state.js',
+  './js/version.js',
   './js/weather.js',
   './js/sessionWeather.js',
   './js/sessionLocation.js',

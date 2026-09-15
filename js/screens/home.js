@@ -5,6 +5,7 @@ import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
 import { finalizeSessionGoal } from '../sessionAnalysis.js';
+import { BUILD_VERSION } from '../version.js';
 
 function icon(paths) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
@@ -141,6 +142,7 @@ export function renderHome(root) {
       ${primaryBtnHtml}
       ${setupLineHtml}
       ${lastSessionHtml}
+      <div class="home-build-tag tiny center">${BUILD_VERSION}</div>
     </div>
   `;
 
