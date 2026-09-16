@@ -819,6 +819,219 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 
 .manual-city-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: var(--space-2); }
 
+/* ---------- Round Setup (§4.3) ---------- */
+
+.setup-course-line { margin: var(--space-4) 0 var(--space-5); }
+.setup-course-name {
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+/* Six per row, not nine. Nine 48px cells need 432px before gaps and only
+   311px is available inside the card at 375px, so a single row cannot meet
+   --tap-min. ux-spec.md §10's rule is to add rows rather than shrink below
+   the minimum, so that is what both the par strip and the hole strip do:
+   9 holes become 6+3, 18 become 6+6+6. */
+.par-strip,
+.hole-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.par-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  min-height: var(--tap-min);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.par-cell:active { transform: scale(0.94); }
+.par-cell-num { font-size: var(--text-caption); color: var(--color-text-tertiary); line-height: 1; }
+.par-cell-par { font-size: var(--text-body-lg); font-weight: var(--weight-bold); line-height: 1.2; }
+
+/* ---------- Hole entry (§4.4, Reference C) ---------- */
+
+.course-hero.compact .course-hero-img { height: 132px; }
+
+.hole-card { margin-top: var(--space-4); }
+.hole-identity { margin-bottom: var(--space-3); }
+.hole-number {
+  font-size: var(--text-heading);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+.hole-meta { margin-top: 1px; font-size: var(--text-body); color: var(--color-text-secondary); }
+
+/* The score stepper is the screen's one dominant control; the short game
+   and putts steppers are the same component a step down, inline and
+   right-aligned, so the screen keeps one dominant idea (§4.4). */
+.stepper { display: flex; align-items: center; justify-content: center; gap: var(--space-3); }
+.stepper.lg { gap: var(--space-5); margin: var(--space-3) 0 var(--space-4); }
+.stepper.sm { gap: var(--space-2); }
+
+.stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  border: 1.5px solid var(--color-divider);
+  transition: transform var(--duration-fast) var(--ease-standard);
+  -webkit-tap-highlight-color: transparent;
+}
+.stepper-btn:active { transform: scale(0.92); }
+.stepper-btn:disabled { opacity: 0.35; cursor: default; }
+.stepper-btn:disabled:active { transform: none; }
+
+.stepper.sm .stepper-btn { width: var(--tap-min); height: var(--tap-min); }
+.stepper.sm .stepper-btn svg { width: 18px; height: 18px; }
+.stepper.lg .stepper-btn { width: 64px; height: 64px; }
+.stepper.lg .stepper-btn svg { width: 24px; height: 24px; }
+
+/* The accent-filled, glowing plus is the hole's primary gesture. */
+.stepper .stepper-btn.plus {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.stepper.lg .stepper-btn.plus { box-shadow: 0 0 18px -4px var(--color-accent); }
+
+.stepper-value { display: flex; flex-direction: column; align-items: center; min-width: 48px; }
+.stepper.sm .stepper-value { min-width: 34px; }
+.stepper-number {
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.stepper.lg .stepper-number { font-size: var(--text-display-xl); }
+.stepper.sm .stepper-number { font-size: var(--text-body-lg); }
+.stepper-caption {
+  margin-top: var(--space-2);
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+
+.hole-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+  min-height: var(--tap-min);
+}
+.hole-row-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+.hole-row-label svg { width: 18px; height: 18px; color: var(--color-accent); }
+
+/* Clubs is the one row whose control needs the full width: several chips
+   plus More do not fit beside a label at 375px, and right-aligning them
+   pushed More onto its own line and left the row needlessly tall on the
+   most vertically-constrained screen in the app. Label above, chips below
+   — the same arrangement Session Setup uses (ux-spec.md §3.7). */
+.hole-row.stacked { display: block; }
+.hole-row.stacked .hole-row-label { margin-bottom: var(--space-2); }
+
+/* Multi-select, so chips are toggles rather than a radio group — several
+   may be active at once (§4.4). */
+.club-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.club-chip {
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  border: 1px solid transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.club-chip.selected {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.club-chip.more { color: var(--color-text-primary); }
+
+.hole-hint {
+  margin-top: var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--color-warning);
+}
+
+.hole-strip-label {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+
+.hole-pip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  min-height: var(--tap-min);
+  border-radius: 50%;
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  background: none;
+  border: 1.5px solid transparent;
+}
+.hole-pip:active { transform: scale(0.94); }
+.hole-pip.current { background: var(--color-accent); color: var(--color-accent-contrast); }
+.hole-pip.played { border-color: var(--color-accent); color: var(--color-accent); }
+.hole-pip.unplayed { border-color: var(--color-divider); color: var(--color-text-tertiary); }
+
+/* Sits outside .scroll so Previous Hole and Save + Next Hole stay reachable
+   without scrolling however tall the card grows (§10). */
+.hole-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  padding-top: var(--space-3);
+}
+/* Both labels must stay on one line at 375px — "‹ Previous Hole" and
+   "Save + Next Hole ›" both wrapped at the default button size, which made
+   the footer two rows tall and pushed the hole strip further out of view. */
+.hole-actions .btn {
+  flex: 1;
+  font-size: var(--text-label);
+  padding-left: var(--space-3);
+  padding-right: var(--space-3);
+  white-space: nowrap;
+}
+.hole-actions .btn-outline { flex: 0 1 42%; }
+
 .home-setup-line {
   margin-top: var(--space-3);
   text-align: center;

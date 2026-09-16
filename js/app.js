@@ -9,6 +9,8 @@ import { renderHistoryDetail } from './screens/historyDetail.js';
 import { renderYourGroove } from './screens/yourGroove.js';
 import { renderCourseSelect } from './screens/courseSelect.js';
 import { renderCourseSetup } from './screens/courseSetup.js';
+import { renderCourseRound } from './screens/courseRound.js';
+import { renderRoundSummary } from './screens/roundSummary.js';
 import { renderTrends } from './screens/trends.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getSettings } from './db.js';
@@ -38,6 +40,8 @@ const routes = [
   // (docs/course-mode-spec.md §2.8, §11.2).
   { pattern: /^#\/course\/select$/, render: () => renderCourseSelect(root) },
   { pattern: /^#\/course\/setup$/, render: () => renderCourseSetup(root) },
+  { pattern: /^#\/course\/round$/, render: () => renderCourseRound(root) },
+  { pattern: /^#\/course\/summary\/([^/]+)$/, render: (m) => renderRoundSummary(root, m[1]) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];
