@@ -218,6 +218,7 @@ function defaultIndex() {
     goals: [],
     rounds: [],
     courses: [],
+    practice_plans: [],
     settings: { lastClub: null, lastSetup: 'ground', lastSurface: 'mat', lastSwing: 'full', lastBallCount: DEFAULT_BALL_COUNT, lastKnownLocation: null, theme: 'dark' },
   };
 }
@@ -237,6 +238,7 @@ function loadIndex() {
     // gains them here rather than through a migration step.
     if (!Array.isArray(_index.rounds)) _index.rounds = [];
     if (!Array.isArray(_index.courses)) _index.courses = [];
+    if (!Array.isArray(_index.practice_plans)) _index.practice_plans = [];
     if (!_index.settings || typeof _index.settings !== 'object') _index.settings = {};
   } catch (e) {
     console.error('Next Ball: failed to load local data, starting fresh', e);
@@ -348,6 +350,7 @@ export function getDB() {
     rounds: index.rounds,
     courses: index.courses,
     holes,
+    practice_plans: index.practice_plans,
     settings: index.settings,
   };
 }
@@ -1351,9 +1354,17 @@ export function deleteRound(roundId) {
   }
 
   const holes = getHolesForRound(roundId);
+  // A practice plan has no meaning once the round that produced it is gone —
+  // it exists to answer "why am I practicing this?" — so it goes with it,
+  // exactly as a session's goal does.
+  const planIdx = index.practice_plans.findIndex((p) => p.round_id === roundId);
+  const removedPlan = planIdx !== -1 ? index.practice_plans[planIdx] : null;
+
   index.rounds.splice(idx, 1);
+  if (removedPlan) index.practice_plans.splice(planIdx, 1);
   if (!saveIndex()) {
     index.rounds.splice(idx, 0, removedRound);
+    if (removedPlan) index.practice_plans.splice(planIdx, 0, removedPlan);
     throw Object.assign(new Error('Failed to delete round'), { code: 'storage_error' });
   }
 
@@ -1364,7 +1375,7 @@ export function deleteRound(roundId) {
   }
   _holesCache.delete(roundId);
 
-  return { round: removedRound, holes };
+  return { round: removedRound, holes, plan: removedPlan };
 }
 
 // ----- Holes -----
@@ -1450,6 +1461,103 @@ export function upsertHole(roundId, holeNumber, patch = {}) {
   return { hole, saved };
 }
 
+// ---------- Practice plans ----------
+//
+// A plan is the structured practice focus roundAnalysis.js generates from a
+// finished round, wrapped here with its own identity, its source round, and
+// a lifecycle status. Storage-only: this module never generates a plan and
+// never decides when one is saved or resolved.
+//
+// Deliberately modelled on the goals collection above, which already solves
+// exactly this problem — an artifact generated from one session, persisted
+// with a status lifecycle, resolved later (§7.3). Plans live in the index
+// for the same reason goals do: they are small and bounded by round count.
+//
+// 'started' and 'completed' have no writer yet. Connecting a saved plan to
+// a range session is a later phase; the statuses exist now so that phase
+// needs no migration.
+export const PLAN_STATUSES = ['saved', 'started', 'completed', 'dismissed', 'superseded'];
+
+function loadPlans() {
+  return loadIndex().practice_plans;
+}
+
+export function getPlans() {
+  return loadPlans();
+}
+
+// The plan a specific round produced, whatever its current status — this is
+// what makes "why am I practicing this?" permanently answerable (§7.2), and
+// what stops a second visit to the same round's Next Practice screen from
+// creating a duplicate.
+export function getPlanForRound(roundId) {
+  return loadPlans().find((p) => p.round_id === roundId) || null;
+}
+
+// At most one plan is ever outstanding. 'saved' (waiting to be practiced)
+// and 'started' (a range session is running it) both count as outstanding;
+// everything else is concluded.
+export function getActivePlan() {
+  return loadPlans().find((p) => p.status === 'saved' || p.status === 'started') || null;
+}
+
+// Creates a saved plan from the focus object roundAnalysis.js produced.
+//
+// Unlike createGoal — whose superseding is done a layer up in
+// sessionAnalysis.js — this supersedes any outstanding plan itself, because
+// saving is a single user action with a single call site and the
+// one-outstanding-plan invariant (§7.3) should not depend on every future
+// caller remembering to resolve the previous one first.
+export function createPlan(roundId, focus) {
+  if (!roundId || !focus) return null;
+  const plans = loadPlans();
+  const ts = nowISO();
+
+  const record = {
+    plan_id: uuid(),
+    // Never null — a plan without its source round could not explain itself.
+    round_id: roundId,
+    created_at: ts,
+    resolved_at: null,
+    status: 'saved',
+    superseded_by: null,
+    // The range session that ran this plan, once that connection exists.
+    started_session_id: null,
+    // Which rule in roundAnalysis.js produced this focus (putting, short
+    // game, full swing, a named club, or maintenance).
+    focus_type: focus.signal ?? null,
+    focus_title: focus.focus_title,
+    focus_rationale: focus.focus_rationale,
+    goal_text: focus.goal_text,
+    steps: Array.isArray(focus.steps) ? focus.steps.map((s) => ({ ...s })) : [],
+  };
+
+  const outstanding = getActivePlan();
+  if (outstanding) {
+    outstanding.status = 'superseded';
+    outstanding.resolved_at = ts;
+    outstanding.superseded_by = record.plan_id;
+  }
+
+  plans.push(record);
+  saveIndex();
+  return record;
+}
+
+// Moves a plan out of 'saved'/'started' into a terminal (or superseding)
+// status, recording the range session that ran it where there is one.
+export function resolvePlan(planId, status, { startedSessionId = null, supersededBy = null } = {}) {
+  const plans = loadPlans();
+  const p = plans.find((x) => x.plan_id === planId);
+  if (!p || !PLAN_STATUSES.includes(status)) return null;
+  p.status = status;
+  p.resolved_at = status === 'started' ? null : nowISO();
+  if (startedSessionId) p.started_session_id = startedSessionId;
+  if (supersededBy) p.superseded_by = supersededBy;
+  saveIndex();
+  return p;
+}
+
 // ---------- Settings ----------
 
 export function getSettings() {
@@ -1498,9 +1606,10 @@ export function importFullDB(obj) {
     // Older backups (pre-goal-persistence) simply have no `goals` key —
     // that's not a corrupt file, just data from before this existed.
     goals: Array.isArray(obj.goals) ? obj.goals : [],
-    // Same for pre-Course-Mode backups and their rounds/courses.
+    // Same for pre-Course-Mode backups and their rounds/courses/plans.
     rounds: Array.isArray(obj.rounds) ? obj.rounds : [],
     courses: Array.isArray(obj.courses) ? obj.courses : [],
+    practice_plans: Array.isArray(obj.practice_plans) ? obj.practice_plans : [],
     // Merged (not `obj.settings || defaultIndex().settings`) so an empty or
     // partial settings object — e.g. Settings' "Erase All Data" passing
     // `{}` deliberately — still ends up with every default field rather

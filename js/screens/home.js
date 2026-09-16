@@ -18,6 +18,7 @@ const ICON_RANGE_BALLS = '<circle cx="12" cy="7.2" r="1.9" /><circle cx="9" cy="
 // A flagstick standing in a hole — Reference A's Course Session badge.
 const ICON_COURSE_FLAG = '<path d="M9 19.5V5.2" /><path d="M9 5.2h8.4l-2.4 3 2.4 3H9" /><ellipse cx="9" cy="19.9" rx="4.6" ry="1.7" />';
 const ICON_CHEVRON = '<path d="M9 5.5 15.5 12 9 18.5" />';
+const ICON_TARGET_SMALL = '<circle cx="12" cy="12" r="8.2" /><circle cx="12" cy="12" r="4.6" /><circle cx="12" cy="12" r="1.1" fill="currentColor" />';
 // Small, simple line glyphs for the compact session-metadata row — deliberately
 // plainer than Active screen's illustrated context-strip icons (which carry
 // their own fills/shading); this row is secondary context on Home, not the
@@ -156,6 +157,22 @@ export function renderHome(root) {
       </div>`;
   }
 
+  // A saved practice plan is reachable from Home (§7.2) — without this a
+  // plan saved today would be unfindable days later, which is the whole
+  // point of persisting it. Deliberately a quiet row, not a third card: it
+  // is a reminder, not a fourth thing competing with the two choices. It
+  // opens the plan and never starts a session on its own.
+  const activePlan = db.getActivePlan();
+  const planRowHtml = (activePlan && !activeSession && !activeRound) ? `
+    <button class="plan-row" id="savedPlanBtn">
+      <span class="plan-row-badge">${icon(ICON_TARGET_SMALL)}</span>
+      <span class="plan-row-text">
+        <span class="plan-row-eyebrow">Practice plan saved</span>
+        <span class="plan-row-title">${escapeHtml(activePlan.focus_title)}</span>
+      </span>
+      <span class="plan-row-chevron">&rsaquo;</span>
+    </button>` : '';
+
   // The setup line stays available because "Edit setup" is the only route to
   // Session Setup for a returning golfer — tapping Range Session starts
   // immediately from saved defaults, exactly as Start Session does today
@@ -207,6 +224,7 @@ export function renderHome(root) {
         iconPaths: ICON_COURSE_FLAG,
       })}
 
+      ${planRowHtml}
       ${setupLineHtml}
       <div class="home-build-tag tiny center">${BUILD_VERSION}</div>
     </div>
@@ -252,6 +270,7 @@ export function renderHome(root) {
   qs('#resumeBtn', root)?.addEventListener('click', () => { location.hash = '#/active'; });
   qs('#resumeRoundBtn', root)?.addEventListener('click', () => { location.hash = '#/course/round'; });
   qs('#editSetupBtn', root)?.addEventListener('click', () => { location.hash = '#/start'; });
+  qs('#savedPlanBtn', root)?.addEventListener('click', () => { location.hash = `#/course/plan/${activePlan.round_id}`; });
   qs('#endSessionBtn', root)?.addEventListener('click', () => openEndSessionSheet(activeSession, () => renderHome(root)));
   qs('#endRoundBtn', root)?.addEventListener('click', () => openEndRoundSheet(activeRound, () => renderHome(root)));
 }

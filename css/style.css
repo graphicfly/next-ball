@@ -1185,6 +1185,58 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 .focus-goal svg { width: 20px; height: 20px; flex-shrink: 0; }
 .focus-goal b { font-weight: var(--weight-semibold); }
 
+/* Two actions and only two (§4.6). Stacked rather than side by side so
+   Save Practice Plan stays the unmistakable primary. */
+.plan-actions { display: flex; flex-direction: column; gap: var(--space-2); flex-shrink: 0; padding-top: var(--space-3); }
+
+.plan-saved-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  font-size: var(--text-caption);
+  color: var(--color-accent);
+}
+.plan-saved-note svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* Home's reminder that a plan is waiting — a quiet row, deliberately not a
+   third choice card (§7.2). */
+.plan-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--tap-min);
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.plan-row:active { transform: scale(0.99); opacity: 0.92; }
+.plan-row-badge { flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--color-accent); }
+.plan-row-badge svg { width: 22px; height: 22px; }
+.plan-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.plan-row-eyebrow {
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+.plan-row-title {
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-row-chevron { flex-shrink: 0; color: var(--color-text-tertiary); font-size: 1.3em; line-height: 1; }
+
 .plan-steps { margin-top: var(--space-3); }
 .plan-step { display: flex; gap: var(--space-3); position: relative; padding-bottom: var(--space-4); }
 .plan-step:last-child { padding-bottom: 0; }
