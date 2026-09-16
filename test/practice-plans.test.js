@@ -311,3 +311,106 @@ describe('Backups and backward compatibility', () => {
     assert.equal(db.getShotsForSession(session.session_id).length, 1);
   });
 });
+
+// Regressions from the V3 QA pass. Each of these was reachable from the UI
+// with a double tap, and none was covered before.
+describe('Repeated taps and stale reads', () => {
+  test('a round with several plans reports its outstanding one, not the first stored', async () => {
+    const db = await resetDB();
+    const round = await playRound(db, ROUND_SHAPES.short_game ?? ROUND_SHAPES.putting);
+    const focus = focusFor(db, round);
+
+    // Saving three times — one double tap on Save Practice Plan — supersedes
+    // the earlier records rather than editing them.
+    const first = db.createPlan(round.round_id, focus);
+    const second = db.createPlan(round.round_id, focus);
+    const third = db.createPlan(round.round_id, focus);
+
+    const all = db.getDB().practice_plans.filter((p) => p.round_id === round.round_id);
+    assert.equal(all.length, 3);
+    assert.equal(all.filter((p) => p.status === 'saved').length, 1, 'exactly one stays outstanding');
+
+    const shown = db.getPlanForRound(round.round_id);
+    assert.equal(shown.plan_id, third.plan_id, 'Round Summary must show the live plan');
+    assert.equal(shown.status, 'saved');
+    assert.notEqual(shown.plan_id, first.plan_id);
+    assert.notEqual(shown.plan_id, second.plan_id);
+  });
+
+  test('once every plan is concluded, the most recent one is still the round story', async () => {
+    const db = await resetDB();
+    const round = await playRound(db, ROUND_SHAPES.putting);
+    const focus = focusFor(db, round);
+    db.createPlan(round.round_id, focus);
+    const latest = db.createPlan(round.round_id, focus);
+    db.resolvePlan(latest.plan_id, 'dismissed');
+
+    const shown = db.getPlanForRound(round.round_id);
+    assert.equal(shown.plan_id, latest.plan_id);
+    assert.equal(shown.status, 'dismissed');
+  });
+
+  test('deleting a round takes every plan it owns, and Undo brings them all back', async () => {
+    const db = await resetDB();
+    const round = await playRound(db, ROUND_SHAPES.putting);
+    const focus = focusFor(db, round);
+    db.createPlan(round.round_id, focus);
+    db.createPlan(round.round_id, focus);
+
+    const result = db.deleteRound(round.round_id);
+    assert.equal(result.plans.length, 2);
+    assert.equal(db.getDB().practice_plans.length, 0, 'no plan is stranded by the delete');
+
+    assert.equal(db.restoreRound(result.round, result.holes, result.plans), true);
+    assert.equal(db.getDB().practice_plans.length, 2);
+    assert.equal(db.getPlanForRound(round.round_id).status, 'saved');
+  });
+
+  test('finishing an already-finished round leaves its completion time alone', async () => {
+    const db = await resetDB();
+    const round = await playRound(db, ROUND_SHAPES.putting);
+    const first = db.getRound(round.round_id).completed_at;
+    assert.ok(first);
+
+    const again = db.finishRound(round.round_id);
+    assert.equal(again.completed_at, first, 'a second finish must not restamp the round');
+    assert.equal(db.getRound(round.round_id).completed_at, first);
+  });
+
+  test('a finished round refuses further hole writes', async () => {
+    const db = await resetDB();
+    const round = await playRound(db, ROUND_SHAPES.putting);
+    const before = db.getHole(round.round_id, 1).strokes;
+
+    const { hole, saved } = db.upsertHole(round.round_id, 1, { strokes: before + 4 });
+    assert.equal(saved, false);
+    assert.equal(hole, null);
+    assert.equal(db.getHole(round.round_id, 1).strokes, before, 'a closed card stays closed');
+  });
+
+  test('deleting the session a plan was running unlinks it rather than stranding it', async () => {
+    const db = await resetDB();
+    const round = await playRound(db, ROUND_SHAPES.putting);
+    const plan = db.createPlan(round.round_id, focusFor(db, round));
+
+    const session = db.createSession({
+      date: '2026-03-01', start_time: '10:00', target_ball_count: 10,
+      default_club: '7i', default_setup: 'ground', default_surface: 'mat', default_swing: 'full',
+    });
+    db.addShot(session.session_id, {
+      club: '7i', setup: 'ground', surface: 'mat', swing_length: 'full',
+      strike: 'solid', direction: 'straight', height: 'medium', distance_yards: 140,
+    });
+    db.resolvePlan(plan.plan_id, 'started', { startedSessionId: session.session_id });
+    db.finishSession(session.session_id);
+    assert.equal(db.getPlan(plan.plan_id).started_session_id, session.session_id);
+
+    const result = db.deleteSession(session.session_id);
+    const after = db.getPlan(plan.plan_id);
+    assert.equal(after.started_session_id, null, 'no pointer to a session that no longer exists');
+    assert.equal(after.status, 'saved', 'and it is waiting to be practiced again, not stuck started');
+
+    db.restoreSession(result.session, result.shots, result.goal, result.plans);
+    assert.equal(db.getPlan(plan.plan_id).started_session_id, session.session_id, 'Undo relinks it');
+  });
+});

@@ -100,6 +100,13 @@ export function renderCourseSetup(root) {
   });
 
   qs('#startRoundBtn', root).addEventListener('click', () => {
+    // One round at a time. Re-read live storage rather than trusting a value
+    // captured at render: a second tap here — or arriving with a round
+    // already in progress — would otherwise create a round that orphans the
+    // first, since Home and the round screen only ever resume the active one.
+    const inProgress = db.getActiveRound();
+    if (inProgress) { location.hash = '#/course/round'; return; }
+
     const holeDefs = pars.map((par, i) => ({
       hole_number: i + 1,
       par,

@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, fmtDate, cap, metricRowHtml, statusBadgeHtml, emptyStateHtml, toast, trapSheetFocus, escapeHtml } from '../ui.js';
+import { qs, qsa, fmtDate, cap, metricRowHtml, statusBadgeHtml, emptyStateHtml, toast, trapSheetFocus, escapeHtml, presentSheet } from '../ui.js';
 import { sessionSummary, clubSummaryLabel } from '../stats.js';
 import { roundTotals, formatToPar } from '../roundAnalysis.js';
 import { downloadSessionCSV } from '../export.js';
@@ -39,7 +39,7 @@ function sessionCardHtml(session) {
         <div class="date">${fmtDate(session.date)} ${badge}${testBadge}</div>
         <div class="row1-right">
           <div class="balls">${shots.length} balls &bull; ${club}</div>
-          ${isFinished ? `<button class="icon-btn session-menu-btn" data-menu-id="${session.session_id}" aria-label="Session options">${ICON_DOTS}</button>` : ''}
+          <button class="icon-btn session-menu-btn" data-menu-id="${session.session_id}" aria-label="Session options">${ICON_DOTS}</button>
         </div>
       </div>
       ${metricRowHtml([
@@ -78,7 +78,7 @@ function roundCardHtml(round) {
         <div class="date">${fmtDate(round.date)} ${badge}${testBadge}</div>
         <div class="row1-right">
           <div class="balls">${round.hole_count} holes</div>
-          ${isFinished ? `<button class="icon-btn round-menu-btn" data-menu-id="${round.round_id}" aria-label="Round options">${ICON_DOTS}</button>` : ''}
+          <button class="icon-btn round-menu-btn" data-menu-id="${round.round_id}" aria-label="Round options">${ICON_DOTS}</button>
         </div>
       </div>
       <div class="round-card-eyebrow">Course round</div>
@@ -110,8 +110,11 @@ export function renderHistory(root) {
     ? entries.map((e) => (e.kind === 'session' ? sessionCardHtml(e.record) : roundCardHtml(e.record))).join('')
     : emptyStateHtml({
       icon: 'history',
-      title: 'No sessions yet',
-      body: 'Every round you log will show up here, ready to compare and revisit.',
+      title: 'Nothing logged yet',
+      // "Round" meant a bucket of balls when this copy was written. Course
+      // Mode gave the word a second meaning, so it is avoided here and both
+      // kinds of activity are named instead.
+      body: 'Range sessions and course rounds both show up here, ready to compare and revisit.',
       actionLabel: 'Start Range Session',
       actionId: 'emptyStartBtn',
     });
@@ -179,27 +182,35 @@ export function renderHistory(root) {
     clearPendingUndo();
     const restored = undo.kind === 'round'
       ? db.restoreRound(undo.round, undo.holes, undo.plan)
-      : db.restoreSession(undo.session, undo.shots, undo.goal);
+      : db.restoreSession(undo.session, undo.shots, undo.goal, undo.plans);
     if (!restored) toast('Could not undo — please check History');
     renderHistory(root);
   });
 }
 
 function openSessionMenuSheet(session, root) {
+  // An unfinished session gets the menu too. It used to be withheld until a
+  // session was finished, which left any session that never got finished —
+  // including one started by accident — with no delete affordance anywhere
+  // in the app. Viewing and exporting stay behind a finished session, since
+  // neither has anything to show for one still in progress.
+  const isFinished = session.status === 'finished';
   const backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
   backdrop.innerHTML = `
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sessionMenuTitle">
       <h2 id="sessionMenuTitle">${fmtDate(session.date)}</h2>
       <div class="stack">
-        <button class="btn" id="menuViewBtn">View Session</button>
-        <button class="btn" id="menuExportBtn">Export Session</button>
+        ${isFinished ? `
+          <button class="btn" id="menuViewBtn">View Session</button>
+          <button class="btn" id="menuExportBtn">Export Session</button>` : `
+          <button class="btn" id="menuResumeBtn">Resume Session</button>`}
         <button class="btn btn-danger" id="menuDeleteBtn" aria-label="Delete this session permanently">Delete Session</button>
         <button class="btn btn-outline" id="menuCancelBtn">Cancel</button>
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#menuCancelBtn', backdrop).focus();
 
@@ -210,13 +221,17 @@ function openSessionMenuSheet(session, root) {
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
   qs('#menuCancelBtn', backdrop).addEventListener('click', close);
-  qs('#menuViewBtn', backdrop).addEventListener('click', () => {
+  qs('#menuViewBtn', backdrop)?.addEventListener('click', () => {
     close();
     location.hash = `#/history/${session.session_id}`;
   });
-  qs('#menuExportBtn', backdrop).addEventListener('click', () => {
+  qs('#menuExportBtn', backdrop)?.addEventListener('click', () => {
     close();
     downloadSessionCSV(session.session_id);
+  });
+  qs('#menuResumeBtn', backdrop)?.addEventListener('click', () => {
+    close();
+    location.hash = '#/active';
   });
   qs('#menuDeleteBtn', backdrop).addEventListener('click', () => {
     close();
@@ -246,7 +261,7 @@ export function openDeleteConfirmSheet(session, root, onDeleted) {
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#deleteCancelBtn', backdrop).focus();
 
@@ -261,7 +276,7 @@ export function openDeleteConfirmSheet(session, root, onDeleted) {
   qs('#deleteConfirmBtn', backdrop).addEventListener('click', () => {
     let result;
     try {
-      result = db.deleteSession(session.session_id);
+      result = db.deleteSession(session.session_id, { allowInProgress: true });
     } catch (err) {
       close();
       toast('Unable to delete session. Please try again.');
@@ -274,7 +289,7 @@ export function openDeleteConfirmSheet(session, root, onDeleted) {
     }
     close();
     clearPendingUndo();
-    pendingUndo = { kind: 'session', session: result.session, shots: result.shots, goal: result.goal };
+    pendingUndo = { kind: 'session', session: result.session, shots: result.shots, goal: result.goal, plans: result.plans };
     pendingUndoTimer = setTimeout(() => {
       // Guard against clobbering whatever screen is showing by the time this
       // fires — root is the single shared #app element reused by every
@@ -298,13 +313,15 @@ function openRoundMenuSheet(round, root) {
       <h2 id="roundMenuTitle">${escapeHtml(round.course_name || 'Round')}</h2>
       <p class="tiny muted" style="margin-bottom:var(--space-3);">${fmtDate(round.date)}</p>
       <div class="stack">
-        <button class="btn" id="roundMenuViewBtn">View Round</button>
+        ${round.status === 'finished'
+          ? '<button class="btn" id="roundMenuViewBtn">View Round</button>'
+          : '<button class="btn" id="roundMenuResumeBtn">Resume Round</button>'}
         <button class="btn btn-danger" id="roundMenuDeleteBtn" aria-label="Delete this round permanently">Delete Round</button>
         <button class="btn btn-outline" id="roundMenuCancelBtn">Cancel</button>
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#roundMenuCancelBtn', backdrop).focus();
 
@@ -315,9 +332,13 @@ function openRoundMenuSheet(round, root) {
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
   qs('#roundMenuCancelBtn', backdrop).addEventListener('click', close);
-  qs('#roundMenuViewBtn', backdrop).addEventListener('click', () => {
+  qs('#roundMenuViewBtn', backdrop)?.addEventListener('click', () => {
     close();
     location.hash = `#/course/summary/${round.round_id}`;
+  });
+  qs('#roundMenuResumeBtn', backdrop)?.addEventListener('click', () => {
+    close();
+    location.hash = '#/course/round';
   });
   qs('#roundMenuDeleteBtn', backdrop).addEventListener('click', () => {
     close();
@@ -347,7 +368,7 @@ function openRoundDeleteConfirmSheet(round, root) {
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#roundDeleteCancelBtn', backdrop).focus();
 
@@ -362,7 +383,7 @@ function openRoundDeleteConfirmSheet(round, root) {
   qs('#roundDeleteConfirmBtn', backdrop).addEventListener('click', () => {
     let result;
     try {
-      result = db.deleteRound(round.round_id);
+      result = db.deleteRound(round.round_id, { allowInProgress: true });
     } catch (err) {
       close();
       toast('Unable to delete round. Please try again.');
@@ -375,7 +396,7 @@ function openRoundDeleteConfirmSheet(round, root) {
     }
     close();
     clearPendingUndo();
-    pendingUndo = { kind: 'round', round: result.round, holes: result.holes, plan: result.plan };
+    pendingUndo = { kind: 'round', round: result.round, holes: result.holes, plan: result.plans ?? result.plan };
     pendingUndoTimer = setTimeout(() => {
       pendingUndo = null;
       if (location.hash === '#/history') renderHistory(root);

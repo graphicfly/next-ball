@@ -131,6 +131,19 @@ export function syncBottomNav(hash) {
   if (homeDot) homeDot.hidden = !getActiveSession() && !getActiveRound();
 }
 
+// Every sheet in the app is a `.sheet-backdrop` appended to <body>. A single
+// double tap on a control that opens one used to append two: they stacked,
+// duplicated each other's DOM ids, and dismissing the front one left the
+// other covering the screen with its buttons still wired to stale state. A
+// sheet is modal by definition, so a second concurrent one is always a
+// mistake — this refuses it, rather than leaving each of the app's twenty-odd
+// sheets to guard itself. Callers stand down when it returns false.
+export function presentSheet(backdrop) {
+  if (document.querySelector('.sheet-backdrop')) return false;
+  document.body.appendChild(backdrop);
+  return true;
+}
+
 // Traps Tab/Shift+Tab within `container` and calls `onClose` on Escape,
 // while `container` is open. Returns a cleanup function to call when the
 // dialog closes by any other means (so the listener doesn't leak). Used by

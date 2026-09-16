@@ -373,6 +373,17 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
               box-shadow var(--duration-base) var(--ease-standard);
 }
 .strike-tile:active { transform: scale(0.96); background: var(--color-surface-2); }
+/* Contact, Height and Distance became keyboard-reachable alongside
+   Direction, so each needs a focus ring of its own. Direction's sits with
+   the fan styles above; the two SVG steps highlight their own marks, since
+   an outline on an SVG <g> is not reliably painted. */
+.strike-tile:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.height-zone:focus-visible .hz-line { stroke: var(--color-accent); stroke-width: 9; }
+.distance-zone:focus-visible .dz-text { fill: var(--color-accent); font-weight: 800; }
+.distance-zone:focus-visible .dz-hit { fill: color-mix(in srgb, var(--color-accent) 14%, transparent); }
 .strike-tile.positive { border-color: var(--color-accent-soft); }
 .strike-tile.selected {
   border-color: var(--color-accent);
@@ -1816,6 +1827,10 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
   min-height: var(--tap-min);
 }
 .secondary-action svg { width: 20px; height: 20px; color: var(--color-accent); }
+/* Undo and Edit Previous with no shots logged yet — dimmed and inert, so
+   they read as not-yet-available rather than unresponsive. */
+.secondary-action:disabled { opacity: 0.35; cursor: default; }
+.secondary-action:disabled svg { color: var(--color-text-secondary); }
 .secondary-action:active { opacity: 0.7; }
 
 .bottom-controls {

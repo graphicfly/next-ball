@@ -70,16 +70,28 @@ export function roundTotals(holes) {
 // The three always add up to toPar, so no stroke is double-counted or
 // invented, and the largest bucket is a defensible answer to "where did the
 // strokes go?" — while still only ever describing fields we collected.
+//
+// fullSwingOver is taken as the residual rather than as
+// `fullSwings - baselineSwings`. The two are algebraically identical on a
+// consistent hole, but roundTotals clamps fullSwings at zero (§5.4 forbids
+// negative derived values), and on an inconsistent hole — putts plus
+// greenside strokes exceeding the strokes recorded — that clamp would
+// otherwise drop the excess and leave the buckets no longer summing to
+// toPar. Deriving the remainder keeps the invariant true for every input.
+// These are signed variances against a baseline, not stroke counts, so a
+// negative one is meaningful ("better than baseline") rather than invalid.
 export function strokeBreakdown(holes) {
   const t = roundTotals(holes);
   const baselinePutts = BASELINE_PUTTS_PER_HOLE * t.holesPlayed;
-  const baselineSwings = t.par - baselinePutts;
+
+  const puttsOver = t.putts - baselinePutts;
+  const shortGameOver = t.shortGame;
 
   return {
     ...t,
-    puttsOver: t.putts - baselinePutts,
-    shortGameOver: t.shortGame,
-    fullSwingOver: t.fullSwings - baselineSwings,
+    puttsOver,
+    shortGameOver,
+    fullSwingOver: t.toPar - puttsOver - shortGameOver,
   };
 }
 
@@ -351,11 +363,40 @@ export function strokeStory(holes) {
       text: `${top.label} and ${second.label.toLowerCase()} each added about ${formatToPar(top.value)}.`,
     };
   }
+
+  // A bucket can legitimately exceed score to par, because the split is
+  // signed against a two-putt-per-hole baseline: a golfer who beats that
+  // baseline makes puttsOver negative, which pushes another bucket above the
+  // round's own total. "+18 of your +9" is the part-larger-than-the-whole
+  // reading that produces, so where a bucket saved strokes we name it
+  // instead of implying a share. Both halves are recorded fields (§7.4).
+  const saver = SAVER_LABELS
+    .map((s) => ({ ...s, value: b[s.field] }))
+    .filter((s) => s.value < 0)
+    .sort((a, b2) => a.value - b2.value)[0];
+
+  if (top.value > b.toPar) {
+    return {
+      kind: top.key,
+      text: saver
+        ? `${top.label} added ${formatToPar(top.value)}, and ${saver.label} saved ${Math.abs(saver.value)}.`
+        : `${top.label} added ${formatToPar(top.value)}.`,
+    };
+  }
+
   return {
     kind: top.key,
     text: `${top.label} accounted for ${formatToPar(top.value)} of your ${formatToPar(b.toPar)}.`,
   };
 }
+
+// Lower-case mid-sentence forms, used only when a bucket came in under its
+// baseline and is named as the offset in strokeStory.
+const SAVER_LABELS = [
+  { key: 'putting', field: 'puttsOver', label: 'putting' },
+  { key: 'short_game', field: 'shortGameOver', label: 'greenside play' },
+  { key: 'full_swing', field: 'fullSwingOver', label: 'full swings' },
+];
 
 // Best and worst consecutive 3-hole stretches by score to par. Returns null
 // below MIN_HOLES_FOR_STRETCH, where the window would be half the round.

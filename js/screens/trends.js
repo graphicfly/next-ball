@@ -148,13 +148,17 @@ export function renderTrends(root) {
       const values = points.map((p) => p[metric.key]).filter((v) => v !== null && v !== undefined);
       const latest = values.length ? values[values.length - 1] : null;
       const first = values.length ? values[0] : null;
-      const diff = latest != null && first != null && values.length > 1 ? Math.round((latest - first) * 10) / 10 : null;
+      // Whole numbers, matching this chart's own axis labels and the
+      // percentages shown on History cards and the Session Summary. The
+      // headline used to print the raw value, so a chart drawn between
+      // rounded axis bounds was captioned "56.7%".
+      const diff = latest != null && first != null && values.length > 1 ? Math.round(latest) - Math.round(first) : null;
       const diffDir = diff == null || diff === 0 ? 'flat' : diff > 0 ? 'up' : 'down';
       const { svg } = lineChartSVG(points, metric);
       bodyHtml = `
         <div class="trend-headline">
           <div class="metric-label">${metric.title}</div>
-          <div class="metric-value">${latest != null ? latest + metric.suffix : '—'}</div>
+          <div class="metric-value">${latest != null ? Math.round(latest) + metric.suffix : '—'}</div>
           ${diff != null ? `<div class="trend-delta"><b class="${diffDir}">${diff > 0 ? '+' : ''}${diff}${metric.diffSuffix}</b> over ${values.length} session${values.length === 1 ? '' : 's'}</div>` : ''}
         </div>
         <div class="card">${svg}</div>`;

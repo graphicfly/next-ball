@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, cap, toast } from '../ui.js';
+import { qs, qsa, cap, toast, presentSheet } from '../ui.js';
 import { getDraft, setDraftField, clearDraft, getFlowReturn } from '../state.js';
 import { openEndSessionSheet } from './home.js';
 
@@ -52,7 +52,7 @@ const LABEL_POS = { left: '139,108', straight: '373.3,42', right: '608,108' };
 function directionFanHtml(selected) {
   const hasSelection = !!selected;
   const wedgeHtml = (value, label) => `
-    <g class="direction-zone${selected === value ? ' selected' : ''}" data-value="${value}" role="button" tabindex="0" aria-label="${label}">
+    <g class="direction-zone${selected === value ? ' selected' : ''}" data-value="${value}" role="button" tabindex="0" aria-pressed="${selected === value}" aria-label="${label}">
       <path class="zone-fill" d="${WEDGE_PATHS[value]}" fill="url(#fanDepth)"></path>
       <path class="zone-border-glow" d="${WEDGE_PATHS[value]}" filter="url(#fanGlow)"></path>
       <path class="zone-border" d="${WEDGE_PATHS[value]}"></path>
@@ -98,7 +98,13 @@ function directionFanHtml(selected) {
 // gradient swap, which is the thing that's unreliable in Safari.
 function heightSceneHtml(selected) {
   const hasSelection = !!selected;
-  const zoneClass = (value) => `height-zone${selected === value ? ' selected' : ''}`;
+  // Carries the same button semantics Direction's wedges have, so all four
+  // steps of shot entry are reachable by keyboard and announced by a screen
+  // reader. The <g> is the tap target and so is the thing that has to be
+  // focusable — the transparent hit rect inside it stays decorative.
+  const zoneAttrs = (value, label) => `class="height-zone${selected === value ? ' selected' : ''}"`
+    + ` data-value="${value}" role="button" tabindex="0"`
+    + ` aria-pressed="${selected === value}" aria-label="${label}"`;
 
   return `
     <div class="height-box">
@@ -110,7 +116,7 @@ function heightSceneHtml(selected) {
           </filter>
         </defs>
 
-        <g class="${zoneClass('low')}" data-value="low">
+        <g ${zoneAttrs("low", "Low, line drive")}>
           <rect class="hz-hit" x="0" y="0" width="370" height="950" fill="transparent"></rect>
           <path class="hz-glow" d="M450,690 Q380,530 322,545" filter="url(#heightGlow)"></path>
           <path class="hz-line" d="M450,690 Q380,530 322,545"></path>
@@ -119,7 +125,7 @@ function heightSceneHtml(selected) {
           <text class="hz-subtitle" x="290" y="483" text-anchor="middle">Line drive</text>
         </g>
 
-        <g class="${zoneClass('medium')}" data-value="medium">
+        <g ${zoneAttrs("medium", "Medium, ideal iron flight")}>
           <rect class="hz-hit" x="370" y="0" width="160" height="950" fill="transparent"></rect>
           <path class="hz-glow" d="M450,690 Q432,540 450,384" filter="url(#heightGlow)"></path>
           <path class="hz-line" d="M450,690 Q432,540 450,384"></path>
@@ -128,7 +134,7 @@ function heightSceneHtml(selected) {
           <text class="hz-subtitle" x="418" y="328" text-anchor="middle">Ideal iron flight</text>
         </g>
 
-        <g class="${zoneClass('high')}" data-value="high">
+        <g ${zoneAttrs("high", "High, towering shot")}>
           <rect class="hz-hit" x="530" y="0" width="370" height="950" fill="transparent"></rect>
           <path class="hz-glow" d="M450,690 Q449,435 596,228" filter="url(#heightGlow)"></path>
           <path class="hz-line" d="M450,690 Q449,435 596,228"></path>
@@ -220,7 +226,7 @@ function distanceLadderHtml(selected, swingLength) {
     const pillH = rung.size * 1.5;
 
     return `
-      <g class="distance-zone${isSelected ? ' selected' : ''}" data-value="${rung.value}">
+      <g class="distance-zone${isSelected ? ' selected' : ''}" data-value="${rung.value}" role="button" tabindex="0" aria-pressed="${isSelected}" aria-label="${rung.value === '200+' ? '200 yards or more' : `${rung.value} yards`}">
         <rect class="dz-hit" x="0" y="${top}" width="900" height="${bottom - top}" fill="transparent"></rect>
         ${isSelected ? `
           <ellipse class="dz-ring" cx="450" cy="${rung.y - rung.size * 0.15}" rx="${rung.size * 3.6}" ry="${rung.size * 1.3}" filter="url(#distanceGlow)"></ellipse>
@@ -259,7 +265,7 @@ function strikeTileGridHtml(selected) {
         const isSelected = selected === type;
         const positive = type === 'solid' && !isSelected ? ' positive' : '';
         return `
-          <div class="strike-tile${isSelected ? ' selected' : ''}${positive}" data-value="${type}">
+          <div class="strike-tile${isSelected ? ' selected' : ''}${positive}" data-value="${type}" role="button" tabindex="0" aria-pressed="${isSelected}" aria-label="${cap(type)} contact">
             <div class="strike-tile-illustration">
               <img src="graphics/direction/strike_${type}.webp" alt="" loading="lazy" />
             </div>
@@ -391,10 +397,11 @@ export function renderShotEntry(root, step) {
 
   qsa(OPTION_SELECTORS[step], root).forEach((btn) => {
     btn.addEventListener('click', () => selectOption(btn.dataset.value));
-    // Direction's zones are SVG <g role="button"> elements — real keyboard
-    // activation (Enter/Space) isn't automatic for those the way it is for
-    // an actual <button>, so it's wired explicitly here. Harmless no-op for
-    // the other steps' elements, which aren't focusable anyway.
+    // Every step's options are div/SVG <g role="button"> elements, so real
+    // keyboard activation (Enter/Space) isn't automatic the way it is for an
+    // actual <button> and has to be wired explicitly. This used to matter
+    // only for Direction, the one step that was focusable; Contact, Height
+    // and Distance are now too, so it applies to all four.
     btn.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectOption(btn.dataset.value); }
     });
@@ -422,7 +429,7 @@ function openCustomDistanceSheet(session, draft, root) {
       <button class="btn btn-outline" id="closeCustomDistanceBtn" style="margin-top:8px;">Cancel</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeCustomDistanceBtn', backdrop).addEventListener('click', () => backdrop.remove());

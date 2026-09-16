@@ -195,12 +195,18 @@ export function buildRecapInsight(s, comparison, personalBests, session, shots) 
   if (!others.length) {
     return { headline: `All ${solidCount} Solid`, sub: 'No mis-hits this session.' };
   }
-  const top = others[0];
-  const topCount = s.strike[top].count;
-  return {
-    headline: `${solidCount} of ${s.total} Solid`,
-    sub: `${topCount === 1 ? 'One' : topCount} ${cap(top)} strike${topCount === 1 ? '' : 's'}.`,
-  };
+  // Every mis-hit type that occurred, not only the most common one. Naming
+  // just the top type read as the whole account of the session's misses —
+  // one thin and one fat reported as "One Thin strike." This branch only
+  // runs for short sessions, so the full list stays short too.
+  const headline = `${solidCount} of ${s.total} Solid`;
+  if (others.length === 1) {
+    const only = others[0];
+    const count = s.strike[only].count;
+    return { headline, sub: `${count === 1 ? 'One' : count} ${cap(only)} strike${count === 1 ? '' : 's'}.` };
+  }
+  const parts = others.map((k) => `${s.strike[k].count} ${cap(k)}`);
+  return { headline, sub: `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}.` };
 }
 
 // ---------- Session Recap "Next Goal" ----------

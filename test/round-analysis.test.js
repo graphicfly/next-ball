@@ -2,7 +2,7 @@ import './setup.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  roundTotals, strokeBreakdown, clubAssociations, positiveMoment,
+  roundTotals, strokeBreakdown, strokeStory, clubAssociations, positiveMoment,
   practiceFocus, formatToPar, MIN_HOLES_FOR_PLAN,
 } from '../js/roundAnalysis.js';
 
@@ -81,6 +81,13 @@ describe('Stroke decomposition', () => {
     { name: 'level par', strokes: [4, 4, 3, 4, 5, 4, 3, 4, 4], putts: [2, 2, 2, 2, 2, 2, 2, 2, 2], shortGame: [] },
     { name: 'under par', strokes: [3, 4, 3, 4, 4, 4, 3, 4, 4], putts: [1, 2, 2, 2, 2, 2, 1, 2, 2], shortGame: [] },
     { name: 'inconsistent hole (§5.4)', strokes: [4, 4, 3, 4, 5, 4, 3, 4, 4], putts: [2, 2, 2, 2, 2, 2, 2, 2, 2], shortGame: [2, 2, 2, 0, 0, 0, 0, 0, 0] },
+    // Inconsistent across the whole round, not just one hole: putts plus
+    // greenside strokes exceed the strokes recorded in aggregate, which is
+    // what actually engages roundTotals' non-negative clamp on fullSwings.
+    // The per-hole case above never reaches it, because the clamp is applied
+    // to round totals.
+    { name: 'inconsistent round total (clamp engaged)', strokes: [3, 3, 3, 3, 3, 3, 3, 3, 3], putts: [2, 2, 2, 2, 2, 2, 2, 2, 2], shortGame: [2, 2, 2, 2, 2, 2, 2, 2, 2] },
+    { name: 'good putter, weak greenside', strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5], putts: [1, 1, 1, 1, 1, 1, 1, 1, 1], shortGame: [2, 2, 2, 2, 2, 2, 2, 2, 2] },
   ];
 
   for (const c of cases) {
@@ -99,6 +106,87 @@ describe('Stroke decomposition', () => {
     assert.equal(b.puttsOver, 7);      // 25 putts against a baseline of 18
     assert.equal(b.shortGameOver, 0);
     assert.equal(b.fullSwingOver, 2);  // 19 swings against a baseline of 17
+  });
+
+  test('the clamp never costs the buckets their sum', async () => {
+    // Round totals: 27 strokes, 18 putts, 18 greenside — putts and greenside
+    // alone exceed the strokes recorded, so fullSwings clamps to 0 per §5.4.
+    const holes = makeHoles({
+      strokes: [3, 3, 3, 3, 3, 3, 3, 3, 3],
+      putts: [2, 2, 2, 2, 2, 2, 2, 2, 2],
+      shortGame: [2, 2, 2, 2, 2, 2, 2, 2, 2],
+    });
+    const t = roundTotals(holes);
+    assert.equal(t.fullSwings, 0, 'derived stroke counts stay non-negative (§5.4)');
+
+    const b = strokeBreakdown(holes);
+    assert.equal(b.puttsOver + b.shortGameOver + b.fullSwingOver, b.toPar);
+  });
+});
+
+// §7.4, applied to the one sentence a golfer reads first after a round. The
+// three buckets are signed variances against a two-putt-per-hole baseline,
+// so the largest can exceed the round's own score to par. Phrasing that as
+// "+18 of your +9" states a part larger than its whole.
+describe('Stroke story — never claims a part larger than the whole', () => {
+  test('a good putter with a weak short game gets an offset sentence, not a share', async () => {
+    // Every hole a bogey, holed in one putt, two greenside strokes.
+    const holes = makeHoles({
+      strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5],
+      putts: [1, 1, 1, 1, 1, 1, 1, 1, 1],
+      shortGame: [2, 2, 2, 2, 2, 2, 2, 2, 2],
+    });
+    const b = strokeBreakdown(holes);
+    assert.equal(b.toPar, 9);
+    assert.equal(b.shortGameOver, 18);
+    assert.equal(b.puttsOver, -9);
+
+    const story = strokeStory(holes);
+    assert.equal(story.kind, 'short_game');
+    assert.equal(story.text, 'Greenside strokes added +18, and putting saved 9.');
+    assert.ok(!story.text.includes('of your'), 'must not phrase an oversized bucket as a share');
+  });
+
+  test('an ordinary round still reads as a share of score to par', async () => {
+    const holes = makeHoles({
+      strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5],
+      putts: [3, 3, 2, 3, 3, 3, 2, 3, 3],
+    });
+    const story = strokeStory(holes);
+    assert.equal(story.text, 'Putting accounted for +7 of your +9.');
+  });
+
+  // The failure was a 9% case, not a 0.01% one, so it is swept rather than
+  // spot-checked: no combination of recorded fields may produce a sentence
+  // asserting a larger number "of" a smaller one.
+  test('no round shape produces a part-larger-than-whole sentence', async () => {
+    const pars = STANDARD_9_PARS;
+    let checked = 0;
+    for (let overPar = 0; overPar <= 3; overPar++) {
+      for (let putts = 0; putts <= 3; putts++) {
+        for (let shortGame = 0; shortGame <= 3; shortGame++) {
+          const holes = makeHoles({
+            pars,
+            strokes: pars.map((p) => p + overPar),
+            putts: pars.map(() => putts),
+            shortGame: pars.map(() => shortGame),
+          });
+          const story = strokeStory(holes);
+          if (!story) continue;
+          checked++;
+
+          const m = story.text.match(/([+-]?\d+) of your ([+-]?\d+)/);
+          if (m) {
+            const part = Math.abs(Number(m[1]));
+            const whole = Math.abs(Number(m[2]));
+            assert.ok(part <= whole,
+              `"${story.text}" claims ${part} of ${whole} (over ${overPar}, putts ${putts}, greenside ${shortGame})`);
+          }
+          assert.ok(!/NaN|undefined|Infinity/.test(story.text), `bad token in "${story.text}"`);
+        }
+      }
+    }
+    assert.ok(checked >= 60, `expected a broad sweep, only checked ${checked}`);
   });
 });
 

@@ -404,3 +404,62 @@ describe('High-volume: bulk delete correctness and performance', () => {
     for (const sh of allShots) assert.ok(remaining.some((s) => s.session_id === sh.session_id));
   });
 });
+
+// Regressions from the V3 QA pass.
+describe('Write validation and test-data clearing', () => {
+  test('a shot with unrecognized fields is refused instead of silently stored empty', async () => {
+    const db = await (await import('./setup.js')).resetDB();
+    const session = db.createSession({
+      date: '2026-03-01', start_time: '10:00', target_ball_count: 10,
+      default_club: '7i', default_setup: 'ground', default_surface: 'mat', default_swing: 'full',
+    });
+
+    // The shape that caused this: plausible-looking field names that are not
+    // the schema's. Previously stored as a shot with undefined strike, which
+    // then reported as 0% solid rather than as a bad write.
+    assert.equal(db.addShot(session.session_id, { contact: 'solid', shape: 'straight' }), null);
+    assert.equal(db.addShot(session.session_id, {}), null);
+    assert.equal(db.addShot(session.session_id, { strike: 'solid' }), null, 'direction is required too');
+    assert.equal(db.getShotsForSession(session.session_id).length, 0);
+
+    // A whiff is the one shot with no direction, height or distance.
+    const miss = db.addShot(session.session_id, {
+      club: '7i', setup: 'ground', surface: 'mat', swing_length: 'full',
+      strike: 'miss', direction: null, height: null, distance_yards: null,
+    });
+    assert.ok(miss, 'a miss is a real shot and must still be accepted');
+    assert.equal(db.getShotsForSession(session.session_id).length, 1);
+  });
+
+  test('clearing test data removes test rounds as well as test sessions', async () => {
+    const db = await (await import('./setup.js')).resetDB();
+
+    const realSession = await makeExactSession(db, { date: '2026-03-01', solidCount: 5, total: 10 });
+    const testSession = await makeExactSession(db, { date: '2026-03-02', solidCount: 5, total: 10 });
+    db.updateSession(testSession.session_id, { data_source: 'test' });
+
+    const course = db.upsertCourse({ name: 'Oakmont Golf Center', source: 'manual', hole_count: 9 });
+    const mkRound = (source) => {
+      const r = db.createRound({
+        course_id: course.course_id, course_name: course.name,
+        course_source: 'manual', hole_count: 9, hole_defs: db.defaultHoleDefs(9),
+      });
+      db.upsertHole(r.round_id, 1, { strokes: 5, putts: 2 });
+      db.finishRound(r.round_id);
+      if (source) db.updateRound(r.round_id, { data_source: source });
+      return r;
+    };
+    const realRound = mkRound(null);
+    const testRound = mkRound('test');
+
+    const result = db.deleteAllTestSessions();
+    assert.equal(result.total, 2, 'one test session and one test round');
+    assert.equal(result.deleted, 2);
+    assert.deepEqual(result.failed, []);
+
+    assert.ok(db.getSession(realSession.session_id), 'real sessions are untouched');
+    assert.equal(db.getSession(testSession.session_id), null);
+    assert.ok(db.getRound(realRound.round_id), 'real rounds are untouched');
+    assert.equal(db.getRound(testRound.round_id), null);
+  });
+});

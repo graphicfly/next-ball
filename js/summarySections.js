@@ -4,7 +4,7 @@
 // presentational — every number here is expected to already be computed by
 // stats.js; this module never touches db.js or does its own math.
 
-import { escapeHtml, metricRowHtml, deltaHtml, qs, qsa, cap, fmtSetup, fmtSurface, fmtSwing, fmtDuration, fmtDurationWords } from './ui.js';
+import { presentSheet, escapeHtml, metricRowHtml, deltaHtml, qs, qsa, cap, fmtSetup, fmtSurface, fmtSwing, fmtDuration, fmtDurationWords } from './ui.js';
 import { clubSummaryLabel } from './stats.js';
 
 const FATIGUE_LABELS = { 1: 'Very fresh', 2: 'Fresh', 3: 'Normal', 4: 'Tired', 5: 'Very tired' };
@@ -388,11 +388,15 @@ export function contactTrendHtml(shots) {
     </div>`;
 }
 
+// Rounds here rather than trusting the caller, exactly as recapArcHtml does.
+// This block sits directly beneath the Solid Contact gauge: the gauge
+// rounded while this interpolated raw, so a single 4-of-6 round rendered
+// "67% Solid" immediately above "66.7% Straight".
 export function recapSecondaryMetricsHtml(straightPct, medianSolid) {
   return `
     <div class="recap-secondary">
       <div class="recap-secondary-metric">
-        <div class="recap-secondary-value">${straightPct}%</div>
+        <div class="recap-secondary-value">${Math.round(straightPct)}%</div>
         <div class="recap-secondary-label">Straight</div>
       </div>
       <div class="recap-secondary-divider"></div>
@@ -707,7 +711,7 @@ export function openShotDetailSheet(shot) {
       ${shot.target_distance_yards != null ? `<div class="kv-row"><span class="muted">Target</span><b>${shot.target_distance_yards} yd</b></div>` : ''}
       <button class="btn" id="closeShotSheetBtn" style="margin-top:var(--space-4);">Close</button>
     </div>`;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeShotSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
 }

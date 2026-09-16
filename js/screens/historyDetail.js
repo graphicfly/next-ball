@@ -2,7 +2,7 @@ import * as db from '../db.js';
 import {
   qs, qsa, fmtDate, fmtDateTime, fmtSetup, fmtSurface, fmtSwing, cap, focusList, escapeHtml, timingLineHtml,
   metricRowHtml, directionBarHtml, heightDistributionHtml, contactDistributionHtml, weatherIconHtml, drillSectionHtml,
-  trainingAidSectionHtml, toast,
+  trainingAidSectionHtml, toast, presentSheet,
 } from '../ui.js';
 import { sessionSummary, strikeBreakdown, clubSummaryLabel } from '../stats.js';
 import { getComparisonContext } from '../sessionAnalysis.js';
@@ -406,7 +406,7 @@ export function openShotDrillSheet(shot, onDone) {
       <button class="btn btn-outline" id="closeDrillSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   const applyDrill = (name) => {
     db.updateShot(shot.session_id, shot.shot_id, { drill: name });
@@ -454,7 +454,7 @@ export function openShotTrainingAidSheet(shot, onDone) {
       <button class="btn btn-outline" id="closeAidSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeAidSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -511,7 +511,7 @@ export function openShotSetupSheet(shot, onDone) {
       <button class="btn btn-outline" id="closeSetupSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeSetupSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -546,7 +546,7 @@ export function openShotTargetSheet(shot, onDone) {
       <button class="btn btn-outline" id="closeTargetSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   const applyTarget = (value) => {
     db.updateShot(shot.session_id, shot.shot_id, { target_distance_yards: value });
@@ -604,7 +604,7 @@ export function openBatchFieldSheet(shots, sessionId, onDone) {
       <button class="btn btn-outline" id="closeBatchFieldBtn" style="margin-top:8px;">Cancel</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeBatchFieldBtn', backdrop).addEventListener('click', () => backdrop.remove());
 
@@ -630,7 +630,7 @@ function openBatchConfirmSheet(fieldLabel, valueLabel, patch, shots, sessionId, 
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#cancelBatchConfirmBtn', backdrop).addEventListener('click', () => backdrop.remove());
   qs('#confirmBatchEditBtn', backdrop).addEventListener('click', () => {
@@ -652,7 +652,7 @@ function openBatchChoiceValueSheet(fieldKey, fieldLabel, options, shots, session
       <button class="btn btn-outline" id="closeBatchValueBtn" style="margin-top:8px;">Cancel</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeBatchValueBtn', backdrop).addEventListener('click', () => backdrop.remove());
 
@@ -682,7 +682,7 @@ function openBatchDrillValueSheet(shots, sessionId, onDone) {
       <button class="btn btn-outline" id="closeBatchDrillBtn" style="margin-top:8px;">Cancel</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeBatchDrillBtn', backdrop).addEventListener('click', () => backdrop.remove());
 
@@ -724,7 +724,7 @@ function openBatchTargetValueSheet(shots, sessionId, onDone) {
       <button class="btn btn-outline" id="closeBatchTargetBtn" style="margin-top:8px;">Cancel</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeBatchTargetBtn', backdrop).addEventListener('click', () => backdrop.remove());
 
@@ -795,7 +795,7 @@ export function openBatchDeleteSheet(shotIds, sessionId, onDone) {
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#cancelBatchDeleteBtn', backdrop).addEventListener('click', () => backdrop.remove());
   qs('#confirmBatchDeleteBtn', backdrop).addEventListener('click', () => {

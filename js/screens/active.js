@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, toast, fmtSetup, fmtSurface, fmtSwing, escapeHtml, fmtDateTime, weatherIconHtml, cap } from '../ui.js';
+import { presentSheet, qs, qsa, toast, fmtSetup, fmtSurface, fmtSwing, escapeHtml, fmtDateTime, weatherIconHtml, cap } from '../ui.js';
 import { startNewShotDraft, startEditShotDraft, setFlowReturn } from '../state.js';
 import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking, refreshWeatherNow, isFetchingWeather } from '../sessionWeather.js';
@@ -215,16 +215,22 @@ export function renderActive(root) {
         ? `<button class="btn btn-primary btn-hero btn-log-shot" id="resumeSessionBtn">${icon(ICON_PLAY)}<span>Resume Session</span></button>`
         : `<button class="btn btn-primary btn-hero btn-log-shot" id="logShotBtn"><span class="log-shot-ball"></span><span>Log Shot</span></button>`}
 
+      <!-- Both act on the last shot, so with no shots logged they have
+           nothing to act on and say so by looking unavailable rather than
+           taking a tap and answering with a toast. -->
       <div class="secondary-actions">
-        <button class="secondary-action" id="undoBtn">${icon(ICON_UNDO)}<span>Undo</span></button>
-        <button class="secondary-action" id="editLastBtn">${icon(ICON_EDIT)}<span>Edit Previous</span></button>
+        <button class="secondary-action" id="undoBtn"${shots.length ? '' : ' disabled'}>${icon(ICON_UNDO)}<span>Undo</span></button>
+        <button class="secondary-action" id="editLastBtn"${shots.length ? '' : ' disabled'}>${icon(ICON_EDIT)}<span>Edit Previous</span></button>
       </div>
 
       <div class="hairline"></div>
 
+      <!-- While paused, the hero button is already Resume Session; a second
+           Resume down here was the same action offered twice. -->
       <div class="bottom-controls">
-        <button class="bottom-control" id="pauseBtn">${icon(paused ? ICON_PLAY : ICON_PAUSE)}<span>${paused ? 'Resume' : 'Pause'} Session</span></button>
-        <div class="bottom-divider"></div>
+        ${paused ? '' : `
+          <button class="bottom-control" id="pauseBtn">${icon(ICON_PAUSE)}<span>Pause Session</span></button>
+          <div class="bottom-divider"></div>`}
         <button class="bottom-control danger" id="finishBtn">${icon(ICON_FLAG)}<span>End Session</span></button>
       </div>
     </div>
@@ -259,17 +265,11 @@ export function renderActive(root) {
     openEditLastShotSheet(root, last);
   });
 
-  qs('#pauseBtn', root).addEventListener('click', () => {
-    if (paused) {
-      db.resumeSession(session.session_id);
-      enableWakeLock();
-      startWeatherTracking(session.session_id);
-      startLocationResolution(session.session_id);
-    } else {
-      db.pauseSession(session.session_id);
-      disableWakeLock();
-      stopWeatherTracking();
-    }
+  // Absent while paused — resuming is the hero button's job then.
+  qs('#pauseBtn', root)?.addEventListener('click', () => {
+    db.pauseSession(session.session_id);
+    disableWakeLock();
+    stopWeatherTracking();
     renderActive(root);
   });
 
@@ -315,7 +315,7 @@ function openPracticeSetupSheet(root, session) {
       <button class="btn btn-outline" id="closePracticeSetupBtn" style="margin-top:8px;">Done</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closePracticeSetupBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -360,7 +360,7 @@ function openEditLastShotSheet(root, shot) {
       <button class="btn btn-outline" id="closeEditLastBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeEditLastBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -399,7 +399,7 @@ function openTargetSheet(root, session) {
       <button class="btn btn-outline" id="closeTargetSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   const applyTarget = (value) => {
     db.updateSession(session.session_id, { current_target_distance: value });
@@ -465,7 +465,7 @@ function openWeatherSheet(root, session) {
       <button class="btn btn-outline" id="closeWeatherSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeWeatherSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -496,7 +496,7 @@ function openClubOnlySheet(root, session) {
       <button class="btn btn-outline" id="closeClubOnlySheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeClubOnlySheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -530,7 +530,7 @@ function openDrillSheet(root, session) {
       <button class="btn btn-outline" id="closeDrillSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   const applyDrill = (name) => {
     db.updateSession(session.session_id, { current_drill: name });
@@ -578,7 +578,7 @@ function openTrainingAidSheet(root, session) {
       <button class="btn btn-outline" id="closeAidSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeAidSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -638,7 +638,7 @@ function openSettingsSheet(root, session) {
       <button class="btn btn-outline" id="closeSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
   qs('#closeSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());

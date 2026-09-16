@@ -11,7 +11,10 @@ const THEME_OPTIONS = [
 export function renderSettings(root) {
   const allSessions = db.getDB().sessions;
   const allShots = db.getDB().shots;
-  const testSessionCount = allSessions.filter((s) => db.sessionDataSource(s) === 'test').length;
+  // Test rounds are counted alongside test sessions: both are generated
+  // data, and one control clears both.
+  const testSessionCount = allSessions.filter((s) => db.sessionDataSource(s) === 'test').length
+    + db.getDB().rounds.filter((r) => db.sessionDataSource(r) === 'test').length;
   const settings = db.getSettings();
   const theme = settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system';
 
@@ -82,7 +85,7 @@ export function renderSettings(root) {
         ${testSessionCount > 0 ? `
         <div class="stack" style="margin-bottom:var(--space-5);">
           <p class="tiny muted">Test data</p>
-          <button class="btn btn-danger" id="clearTestBtn">Delete All Test Sessions (${testSessionCount})</button>
+          <button class="btn btn-danger" id="clearTestBtn">Delete All Test Data (${testSessionCount})</button>
         </div>` : ''}
 
         <div class="stack">
@@ -141,11 +144,11 @@ export function renderSettings(root) {
   });
 
   qs('#clearTestBtn', root)?.addEventListener('click', () => {
-    const ok = confirm(`This permanently deletes ${testSessionCount} test session${testSessionCount === 1 ? '' : 's'} and their shots. Real sessions are never affected. Continue?`);
+    const ok = confirm(`This permanently deletes ${testSessionCount} test record${testSessionCount === 1 ? '' : 's'} — generated sessions and rounds, and everything stored with them. Your real sessions and rounds are never affected. Continue?`);
     if (!ok) return;
     const result = db.deleteAllTestSessions();
-    if (result.failed.length) toast(`Deleted ${result.deleted} of ${result.total} test sessions`);
-    else toast(`Deleted ${result.deleted} test session${result.deleted === 1 ? '' : 's'}`);
+    if (result.failed.length) toast(`Deleted ${result.deleted} of ${result.total} test records`);
+    else toast(`Deleted ${result.deleted} test record${result.deleted === 1 ? "" : "s"}`);
     renderSettings(root);
   });
 

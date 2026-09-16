@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, escapeHtml, toast, trapSheetFocus } from '../ui.js';
+import { qs, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
 import { practiceFocus, isRangePracticable } from '../roundAnalysis.js';
 import { setPendingPlanId } from '../state.js';
 
@@ -130,7 +130,7 @@ function openDeletePlanSheet(root, plan, roundId) {
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#cancelDeletePlanBtn', backdrop).focus();
 

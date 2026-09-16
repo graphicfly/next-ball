@@ -780,13 +780,16 @@ export function listFinishedSessions() {
 // simply never read by anything. The reverse order would risk the opposite,
 // user-visible failure: a session that still appears in History but shows
 // zero shots.
-export function deleteSession(sessionId) {
+// `allowInProgress` exists for the one caller that means it: History's
+// delete, reached through a named confirmation sheet. Everywhere else an
+// in-progress session is protected from a stray call.
+export function deleteSession(sessionId, { allowInProgress = false } = {}) {
   const index = loadIndex();
   const idx = index.sessions.findIndex((s) => s.session_id === sessionId);
   if (idx === -1) return null;
 
   const removedSession = index.sessions[idx];
-  if (removedSession.status === 'active' || removedSession.status === 'paused') {
+  if (!allowInProgress && (removedSession.status === 'active' || removedSession.status === 'paused')) {
     throw Object.assign(new Error('Cannot delete an in-progress session'), { code: 'active_session' });
   }
 
@@ -798,11 +801,29 @@ export function deleteSession(sessionId) {
   const goalIdx = index.goals.findIndex((g) => g.session_id === sessionId);
   const removedGoal = goalIdx !== -1 ? index.goals[goalIdx] : null;
 
+  // A practice plan outlives the session that ran it — it belongs to the
+  // round that produced it — but its pointer to that session must not. A
+  // plan left 'started' against a deleted session reads as permanently in
+  // progress and can never be completed. Unlinking returns it to 'saved',
+  // which is the truth: it is waiting to be practiced again.
+  const relinkedPlans = index.practice_plans
+    .filter((p) => p.started_session_id === sessionId)
+    .map((p) => ({ plan_id: p.plan_id, started_session_id: p.started_session_id, status: p.status }));
+  for (const p of index.practice_plans) {
+    if (p.started_session_id !== sessionId) continue;
+    p.started_session_id = null;
+    if (p.status === 'started') p.status = 'saved';
+  }
+
   index.sessions.splice(idx, 1);
   if (removedGoal) index.goals.splice(goalIdx, 1);
   if (!saveIndex()) {
     index.sessions.splice(idx, 0, removedSession); // roll back the in-memory removal — nothing was actually persisted
     if (removedGoal) index.goals.splice(goalIdx, 0, removedGoal);
+    for (const snap of relinkedPlans) {
+      const p = index.practice_plans.find((x) => x.plan_id === snap.plan_id);
+      if (p) { p.started_session_id = snap.started_session_id; p.status = snap.status; }
+    }
     throw Object.assign(new Error('Failed to delete session'), { code: 'storage_error' });
   }
 
@@ -813,7 +834,9 @@ export function deleteSession(sessionId) {
   }
   _shotsCache.delete(sessionId);
 
-  return { session: removedSession, shots, goal: removedGoal };
+  // `plans` carries the plan links this delete had to break, so Undo can put
+  // them back exactly as they were.
+  return { session: removedSession, shots, goal: removedGoal, plans: relinkedPlans };
 }
 
 // Re-inserts a session and its shots exactly as returned by deleteSession(),
@@ -823,8 +846,9 @@ export function deleteSession(sessionId) {
 // again (nothing to do) or if the write fails, so the caller can show a
 // simple "Couldn't undo" message rather than crash. `goal` is optional
 // (deleteSession's result may carry null) so every existing 2-arg caller
-// keeps working unchanged.
-export function restoreSession(session, shots, goal = null) {
+// keeps working unchanged, and `plans` — the plan links the delete had to
+// break — is optional for the same reason.
+export function restoreSession(session, shots, goal = null, plans = []) {
   const index = loadIndex();
   if (index.sessions.some((s) => s.session_id === session.session_id)) return false;
 
@@ -853,6 +877,22 @@ export function restoreSession(session, shots, goal = null) {
     saveIndex();
   }
 
+  // Re-point any plan that was running this session, so an undone delete
+  // leaves the plan exactly as it was rather than silently demoted to
+  // 'saved'. Skipped where another plan has since become outstanding, which
+  // would break the one-outstanding-plan invariant (§7.3).
+  let relinked = false;
+  for (const snap of plans) {
+    const p = index.practice_plans.find((x) => x.plan_id === snap.plan_id);
+    if (!p || p.started_session_id) continue;
+    const outstanding = getActivePlan();
+    if (snap.status === 'started' && outstanding && outstanding.plan_id !== p.plan_id) continue;
+    p.started_session_id = snap.started_session_id;
+    p.status = snap.status;
+    relinked = true;
+  }
+  if (relinked) saveIndex();
+
   return true;
 }
 
@@ -862,23 +902,52 @@ export function restoreSession(session, shots, goal = null) {
 // real and are never touched. Per-session failures are collected rather
 // than aborting the whole batch, so one bad write can't leave the rest
 // undeleted.
+// Removes every session AND every round marked as test data. Rounds were
+// missing here, which left generated test rounds sitting in History and in
+// round-to-round comparisons with no way to remove them short of erasing
+// everything. Counted and reported together, since to the golfer they are
+// one pile of fake data rather than two.
 export function deleteAllTestSessions() {
-  const targets = loadIndex().sessions.filter((s) => sessionDataSource(s) === 'test').map((s) => s.session_id);
+  const index = loadIndex();
+  const sessionIds = index.sessions.filter((s) => sessionDataSource(s) === 'test').map((s) => s.session_id);
+  const roundIds = index.rounds.filter((r) => sessionDataSource(r) === 'test').map((r) => r.round_id);
+
   let deleted = 0;
   const failed = [];
-  for (const id of targets) {
+  for (const id of sessionIds) {
     try {
-      if (deleteSession(id)) deleted++;
+      if (deleteSession(id, { allowInProgress: true })) deleted++;
     } catch (e) {
       failed.push(id);
     }
   }
-  return { deleted, failed, total: targets.length };
+  for (const id of roundIds) {
+    try {
+      if (deleteRound(id, { allowInProgress: true })) deleted++;
+    } catch (e) {
+      failed.push(id);
+    }
+  }
+  return { deleted, failed, total: sessionIds.length + roundIds.length };
 }
 
 // ---------- Shots ----------
 
 export function addShot(sessionId, fields) {
+  // Strike is what every analysis in the app counts, and a write that
+  // carries none — a caller using the wrong field names, say — used to be
+  // stored silently as a shot with undefined values, reading afterwards as
+  // 0% solid rather than as the mistake it was.
+  //
+  // Direction is required with it, except on a miss: a whiff has no ball
+  // flight, so shot entry skips direction, height and distance entirely and
+  // stores nulls for all three.
+  const isMiss = fields?.strike === 'miss';
+  if (!STRIKE.includes(fields?.strike) || (!isMiss && !DIRECTION.includes(fields?.direction))) {
+    console.error('Next Ball: refused a shot with no recognized strike/direction', fields);
+    return null;
+  }
+
   const shotsForSession = loadShotsChunk(sessionId);
   const shot_number = shotsForSession.length + 1;
   const ts = nowISO();
@@ -1331,7 +1400,14 @@ export function resumeRound(roundId) {
 // an empty record (§8); that is a UI decision made once, at the single place
 // a round is ended, and deliberately not enforced here — the same division
 // of responsibility as finishSession()/deleteSession().
+// Idempotent: finishing a round that is already finished returns it
+// untouched rather than stamping a fresh completed_at, which would move a
+// round in History every time a stale screen or a double tap reached this.
 export function finishRound(roundId) {
+  const existing = getRound(roundId);
+  if (!existing) return null;
+  if (existing.status === 'finished') return existing;
+
   return updateRound(roundId, {
     status: 'finished',
     end_time: nowLocalTimeString(),
@@ -1343,28 +1419,35 @@ export function finishRound(roundId) {
 // worst possible partial failure is an orphaned holes chunk, which nothing
 // ever reads because every read reaches a round's holes by walking the
 // index.
-export function deleteRound(roundId) {
+// `allowInProgress` exists for the one caller that means it: History's
+// delete, reached through a named confirmation sheet. Everywhere else an
+// in-progress round is protected, so no stray call can remove a round that
+// is currently being played.
+export function deleteRound(roundId, { allowInProgress = false } = {}) {
   const index = loadIndex();
   const idx = index.rounds.findIndex((r) => r.round_id === roundId);
   if (idx === -1) return null;
 
   const removedRound = index.rounds[idx];
-  if (removedRound.status === 'active' || removedRound.status === 'paused') {
+  if (!allowInProgress && (removedRound.status === 'active' || removedRound.status === 'paused')) {
     throw Object.assign(new Error('Cannot delete an in-progress round'), { code: 'active_round' });
   }
 
   const holes = getHolesForRound(roundId);
   // A practice plan has no meaning once the round that produced it is gone —
   // it exists to answer "why am I practicing this?" — so it goes with it,
-  // exactly as a session's goal does.
-  const planIdx = index.practice_plans.findIndex((p) => p.round_id === roundId);
-  const removedPlan = planIdx !== -1 ? index.practice_plans[planIdx] : null;
+  // exactly as a session's goal does. Every plan for the round goes, not just
+  // the first: saving a plan twice supersedes rather than replaces, so a
+  // round can own several records and removing one would strand the rest.
+  const removedPlans = index.practice_plans.filter((p) => p.round_id === roundId);
 
   index.rounds.splice(idx, 1);
-  if (removedPlan) index.practice_plans.splice(planIdx, 1);
+  if (removedPlans.length) {
+    index.practice_plans = index.practice_plans.filter((p) => p.round_id !== roundId);
+  }
   if (!saveIndex()) {
     index.rounds.splice(idx, 0, removedRound);
-    if (removedPlan) index.practice_plans.splice(planIdx, 0, removedPlan);
+    if (removedPlans.length) index.practice_plans.push(...removedPlans);
     throw Object.assign(new Error('Failed to delete round'), { code: 'storage_error' });
   }
 
@@ -1375,7 +1458,9 @@ export function deleteRound(roundId) {
   }
   _holesCache.delete(roundId);
 
-  return { round: removedRound, holes, plan: removedPlan };
+  // `plan` stays in the shape callers already destructure; `plans` carries
+  // the full set so Undo can put every one of them back.
+  return { round: removedRound, holes, plan: removedPlans[0] ?? null, plans: removedPlans };
 }
 
 // Re-inserts a round, its holes, and the practice plan it produced, exactly
@@ -1397,12 +1482,19 @@ export function restoreRound(round, holes, plan = null) {
   _holesCache.set(round.round_id, holes);
   saveHolesChunk(round.round_id);
 
-  if (plan && !index.practice_plans.some((p) => p.plan_id === plan.plan_id)) {
+  // Accepts either the single plan deleteRound has always returned or the
+  // full `plans` array, so a round that owns several records comes back whole.
+  for (const one of Array.isArray(plan) ? plan : [plan]) restorePlan(one);
+
+  return true;
+
+  function restorePlan(one) {
+    if (!one || index.practice_plans.some((p) => p.plan_id === one.plan_id)) return;
     // Guards the one-outstanding-plan invariant the same way restoreSession
     // guards the single-active-goal one: if another plan became outstanding
     // during the undo window, the restored plan rejoins as superseded rather
     // than creating a second outstanding plan.
-    const restored = { ...plan };
+    const restored = { ...one };
     const outstanding = getActivePlan();
     const wasOutstanding = restored.status === 'saved' || restored.status === 'started';
     if (wasOutstanding && outstanding && outstanding.plan_id !== restored.plan_id) {
@@ -1413,8 +1505,6 @@ export function restoreRound(round, holes, plan = null) {
     index.practice_plans.push(restored);
     saveIndex();
   }
-
-  return true;
 }
 
 // ----- Holes -----
@@ -1447,6 +1537,11 @@ export function roundHolesPlayed(roundId) {
 export function upsertHole(roundId, holeNumber, patch = {}) {
   const round = getRound(roundId);
   if (!round) return { hole: null, saved: false };
+  // A finished round's card is closed. Without this a stale hole screen or a
+  // late tap could still mutate a completed scorecard — and its summary,
+  // plan and comparisons were all computed from the card as it stood at
+  // finish time.
+  if (round.status === 'finished') return { hole: null, saved: false };
 
   const num = Math.round(Number(holeNumber));
   if (!Number.isFinite(num) || num < 1 || num > round.hole_count) return { hole: null, saved: false };
@@ -1529,8 +1624,20 @@ export function getPlans() {
 // what makes "why am I practicing this?" permanently answerable (§7.2), and
 // what stops a second visit to the same round's Next Practice screen from
 // creating a duplicate.
+//
+// A round can hold more than one plan record, because saving again supersedes
+// the previous one rather than editing it in place. Taking the first match in
+// storage order therefore returned a superseded record, and Round Summary
+// announced "Replaced by a newer plan" for a plan nothing had replaced. An
+// outstanding plan is always the answer where one exists; otherwise the most
+// recently created concluded plan is the round's current story. Ties fall
+// back to storage order, since two plans saved in the same millisecond carry
+// identical created_at values.
 export function getPlanForRound(roundId) {
-  return loadPlans().find((p) => p.round_id === roundId) || null;
+  const mine = loadPlans().filter((p) => p.round_id === roundId);
+  if (!mine.length) return null;
+  return mine.find((p) => p.status === 'saved' || p.status === 'started')
+    || mine.reduce((latest, p) => (p.created_at >= latest.created_at ? p : latest));
 }
 
 export function getPlan(planId) {

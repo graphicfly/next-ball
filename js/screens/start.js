@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, toast, todayLocalDate, nowLocalTime, escapeHtml } from '../ui.js';
+import { qs, qsa, toast, todayLocalDate, nowLocalTime, escapeHtml, presentSheet } from '../ui.js';
 import { enableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
@@ -308,7 +308,7 @@ export function renderStart(root) {
           </div>`).join('')}
         <button class="btn btn-outline" id="closeClubSheetBtn">Close</button>
       </div>`;
-    document.body.appendChild(backdrop);
+    if (!presentSheet(backdrop)) return;
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
     qs('#closeClubSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
     qsa('.choice-btn', backdrop).forEach((btn) => {
@@ -335,7 +335,7 @@ export function renderStart(root) {
         <button class="btn btn-primary" id="setCustomBallBtn" style="margin-top:var(--space-3);">Set Ball Count</button>
         <button class="btn btn-outline" id="closeBallSheetBtn" style="margin-top:8px;">Close</button>
       </div>`;
-    document.body.appendChild(backdrop);
+    if (!presentSheet(backdrop)) return;
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
     qs('#closeBallSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
     qsa('.choice-btn', backdrop).forEach((btn) => {
@@ -372,7 +372,7 @@ export function renderStart(root) {
         </div>
         <button class="btn btn-outline" id="closeDrillSheetBtn" style="margin-top:8px;">Close</button>
       </div>`;
-    document.body.appendChild(backdrop);
+    if (!presentSheet(backdrop)) return;
     const applyDrill = (name) => { state.drill = name; backdrop.remove(); renderAll(); };
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
     qs('#closeDrillSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -411,7 +411,7 @@ export function renderStart(root) {
         </div>
         <button class="btn btn-outline" id="closeTargetSheetBtn" style="margin-top:8px;">Close</button>
       </div>`;
-    document.body.appendChild(backdrop);
+    if (!presentSheet(backdrop)) return;
     const applyTarget = (value) => { state.target = value; backdrop.remove(); renderAll(); };
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
     qs('#closeTargetSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
@@ -445,7 +445,7 @@ export function renderStart(root) {
         </div>
         <button class="btn btn-outline" id="closeAidSheetBtn" style="margin-top:8px;">Close</button>
       </div>`;
-    document.body.appendChild(backdrop);
+    if (!presentSheet(backdrop)) return;
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
     qs('#closeAidSheetBtn', backdrop).addEventListener('click', () => backdrop.remove());
     qsa('.choice-btn', backdrop).forEach((btn) => {

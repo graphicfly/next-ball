@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, escapeHtml, toast, trapSheetFocus } from '../ui.js';
+import { qs, qsa, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
 import { getClubQuickPicks } from '../setupPersonalization.js';
 import { openEndRoundSheet } from './home.js';
 
@@ -302,7 +302,7 @@ function renderHole(root, roundId, holeNumber) {
         <button class="btn btn-primary" id="clubPickerDoneBtn" style="margin-top:var(--space-3);">Done</button>
       </div>
     `;
-    document.body.appendChild(backdrop);
+    if (!presentSheet(backdrop)) return;
     const untrap = trapSheetFocus(backdrop, close);
 
     function close() {

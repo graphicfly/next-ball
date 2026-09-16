@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, escapeHtml, toast, trapSheetFocus } from '../ui.js';
+import { qs, qsa, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
 import { setPendingCourseId } from '../state.js';
 import { nearbyCoursesFromDevice, searchCourses, manualCourse, LOOKUP_STATUS } from '../courseProvider.js';
 
@@ -148,7 +148,7 @@ function openSheet(innerHtml, { onClose } = {}) {
   const backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
   backdrop.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${innerHtml}</div>`;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
 
   function close() {

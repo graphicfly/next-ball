@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, fmtSetup, fmtSurface, fmtSwing, fmtDurationWords, escapeHtml, trapSheetFocus, todayLocalDate, nowLocalTime } from '../ui.js';
+import { qs, fmtSetup, fmtSurface, fmtSwing, fmtDurationWords, escapeHtml, trapSheetFocus, todayLocalDate, nowLocalTime, presentSheet } from '../ui.js';
 import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
@@ -40,6 +40,16 @@ const ICON_ELAPSED = '<path d="M7 3h10M7 21h10" /><path d="M7 3c0 4 3 5 5 6-2 1-
 // one-tap path never encounters (settings.lastClub is always a concrete
 // value once it exists).
 function startWithDefaults(settings) {
+  // Re-read rather than trusting the `activeSession` the render pass closed
+  // over: that value is stale the instant a first tap creates a session, so
+  // a double tap on the Home card used to create a second one — and every
+  // session after the newest was orphaned, since Home only ever offers to
+  // resume the latest. Checking live storage here makes the create
+  // idempotent for any number of rapid taps, without a debounce timer on
+  // the app's most-used control.
+  const existing = db.getActiveSession();
+  if (existing) { location.hash = '#/active'; return; }
+
   const session = db.createSession({
     date: todayLocalDate(),
     start_time: nowLocalTime(),
@@ -323,7 +333,7 @@ function openRangeStartSheet(plan, startNormal) {
       <button class="btn btn-outline" id="cancelRangeStartBtn" style="margin-top:var(--space-2);">Cancel</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
 
   function close() {
@@ -420,7 +430,7 @@ function confirmSwitchActivity(root, { title, body, confirmLabel, onConfirm }) {
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#cancelSwitchBtn', backdrop).focus();
 
@@ -460,7 +470,7 @@ export function openEndRoundSheet(round, onDone) {
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#cancelEndRoundBtn', backdrop).focus();
 
@@ -513,7 +523,7 @@ export function openEndSessionSheet(session, onDone) {
       </div>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
   const untrap = trapSheetFocus(backdrop, close);
   qs('#cancelEndBtn', backdrop).focus();
 

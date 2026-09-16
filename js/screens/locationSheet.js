@@ -3,7 +3,7 @@
 // always be corrected the same way. Deliberately NOT part of the
 // Contact/Direction/Height/Distance shot-entry sequence.
 import * as db from '../db.js';
-import { qs, qsa, toast, escapeHtml } from '../ui.js';
+import { qs, qsa, toast, escapeHtml, presentSheet } from '../ui.js';
 import { getCurrentPosition, fetchLocationDetails } from '../weather.js';
 import { fetchNearbyGolfVenues, resolveVenueConfidence } from '../places.js';
 import { ensureSessionPosition } from '../sessionLocation.js';
@@ -47,7 +47,7 @@ export function openLocationSheet(session, onDone) {
       <button class="btn btn-outline" id="closeLocationSheetBtn" style="margin-top:8px;">Close</button>
     </div>
   `;
-  document.body.appendChild(backdrop);
+  if (!presentSheet(backdrop)) return;
 
   const close = () => backdrop.remove();
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
