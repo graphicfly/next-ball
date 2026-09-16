@@ -1032,6 +1032,27 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 }
 .hole-actions .btn-outline { flex: 0 1 42%; }
 
+/* A course round in History. Shares the session card's shell so History
+   keeps one visual language, distinguished by an accent edge and an
+   eyebrow so the two kinds of activity are never mistaken for each other. */
+.round-card { border-left: 3px solid var(--color-accent); }
+.round-card-eyebrow {
+  margin-top: var(--space-2);
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-accent);
+}
+.round-card-course {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- Round Summary (§4.5, Reference D) ---------- */
 /* A reward, not a report: one hero number, and deliberately no date,
    location, duration or secondary statistics competing with it. */

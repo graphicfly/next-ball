@@ -1378,6 +1378,45 @@ export function deleteRound(roundId) {
   return { round: removedRound, holes, plan: removedPlan };
 }
 
+// Re-inserts a round, its holes, and the practice plan it produced, exactly
+// as deleteRound() returned them — the counterpart to History's brief Undo
+// window. Not a general "recreate a round" API: it trusts the caller to
+// pass back precisely what was removed. Returns false rather than throwing
+// if the round already exists again or the write fails, so the caller can
+// show "couldn't undo" instead of crashing.
+export function restoreRound(round, holes, plan = null) {
+  const index = loadIndex();
+  if (index.rounds.some((r) => r.round_id === round.round_id)) return false;
+
+  index.rounds.push(round);
+  if (!saveIndex()) {
+    index.rounds.pop();
+    return false;
+  }
+
+  _holesCache.set(round.round_id, holes);
+  saveHolesChunk(round.round_id);
+
+  if (plan && !index.practice_plans.some((p) => p.plan_id === plan.plan_id)) {
+    // Guards the one-outstanding-plan invariant the same way restoreSession
+    // guards the single-active-goal one: if another plan became outstanding
+    // during the undo window, the restored plan rejoins as superseded rather
+    // than creating a second outstanding plan.
+    const restored = { ...plan };
+    const outstanding = getActivePlan();
+    const wasOutstanding = restored.status === 'saved' || restored.status === 'started';
+    if (wasOutstanding && outstanding && outstanding.plan_id !== restored.plan_id) {
+      restored.status = 'superseded';
+      restored.resolved_at = nowISO();
+      restored.superseded_by = outstanding.plan_id;
+    }
+    index.practice_plans.push(restored);
+    saveIndex();
+  }
+
+  return true;
+}
+
 // ----- Holes -----
 
 export function getHolesForRound(roundId) {

@@ -38,7 +38,12 @@ export function renderRoundSummary(root, roundId) {
   const holes = db.getHolesForRound(roundId);
   const totals = roundTotals(holes);
   const moment = positiveMoment(round, holes, priorRoundSummaries(round));
-  const focus = practiceFocus(round, holes);
+  // A round that already produced a plan shows that plan rather than a
+  // freshly regenerated focus — this is how a concluded plan stays
+  // reachable, through the round that explains it (§7.9). Otherwise the
+  // card offers the focus this round would generate.
+  const savedPlan = db.getPlanForRound(roundId);
+  const focus = savedPlan || practiceFocus(round, holes);
 
   root.innerHTML = `
     <div class="screen">
@@ -82,7 +87,7 @@ export function renderRoundSummary(root, roundId) {
           <button class="next-practice-card" id="nextPracticeBtn">
             <span class="next-practice-badge">${icon(ICON_TARGET)}</span>
             <span class="next-practice-text">
-              <span class="next-practice-eyebrow">Next Practice</span>
+              <span class="next-practice-eyebrow">${savedPlan ? escapeHtml(planStatusLabel(savedPlan.status)) : 'Next Practice'}</span>
               <span class="next-practice-title">${escapeHtml(focus.focus_title)}</span>
               <span class="next-practice-desc">${escapeHtml(focus.focus_rationale)}</span>
             </span>
@@ -108,6 +113,19 @@ export function renderRoundSummary(root, roundId) {
   qs('#exploreBtn', root).addEventListener('click', () => { location.hash = `#/course/explore/${roundId}`; });
   // The whole card is the tap target, not a button inside it (§4.5).
   qs('#nextPracticeBtn', root)?.addEventListener('click', () => { location.hash = `#/course/plan/${roundId}`; });
+}
+
+// A stored plan shows its own state in place of the "Next Practice"
+// eyebrow, so a round opened from History says what became of the plan it
+// produced rather than presenting it as a fresh suggestion (§7.9).
+function planStatusLabel(status) {
+  return {
+    saved: 'Practice plan saved',
+    started: 'Practice plan in progress',
+    completed: 'Practice plan completed',
+    dismissed: 'Practice plan deleted',
+    superseded: 'Replaced by a newer plan',
+  }[status] || 'Next Practice';
 }
 
 // One cell per hole: number above, score in a ring below. Ring color encodes
