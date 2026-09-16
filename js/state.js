@@ -63,3 +63,19 @@ export function setGrooveReturn(hash) {
 export function getGrooveReturn() {
   return grooveReturnHash;
 }
+
+// The course chosen on Select a Course, held only until Round Setup turns it
+// into an actual round. Transient for the same reason a half-entered shot is
+// (see the module comment): the course record itself is already persisted by
+// then, so the worst case after a refresh is re-tapping it in Recent —
+// which is one tap, and by definition now the most recent course.
+let pendingCourseId = null;
+export function setPendingCourseId(courseId) {
+  pendingCourseId = courseId;
+}
+export function getPendingCourseId() {
+  return pendingCourseId;
+}
+export function clearPendingCourse() {
+  pendingCourseId = null;
+}

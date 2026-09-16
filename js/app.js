@@ -7,6 +7,8 @@ import { renderSummary } from './screens/summary.js';
 import { renderHistory } from './screens/history.js';
 import { renderHistoryDetail } from './screens/historyDetail.js';
 import { renderYourGroove } from './screens/yourGroove.js';
+import { renderCourseSelect } from './screens/courseSelect.js';
+import { renderCourseSetup } from './screens/courseSetup.js';
 import { renderTrends } from './screens/trends.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getSettings } from './db.js';
@@ -30,6 +32,12 @@ const routes = [
   { pattern: /^#\/history$/, render: () => renderHistory(root) },
   { pattern: /^#\/history\/([^/]+)$/, render: (m) => renderHistoryDetail(root, m[1]) },
   { pattern: /^#\/groove\/([^/]+)$/, render: (m) => renderYourGroove(root, m[1]) },
+  // Course Mode. Every one of these is a single-task screen, so none of them
+  // is in ui.js's NAV_ROUTES and the bottom nav hides itself automatically —
+  // global navigation stays exactly Home | History | Trends | Settings
+  // (docs/course-mode-spec.md §2.8, §11.2).
+  { pattern: /^#\/course\/select$/, render: () => renderCourseSelect(root) },
+  { pattern: /^#\/course\/setup$/, render: () => renderCourseSetup(root) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];

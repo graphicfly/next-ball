@@ -633,6 +633,192 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
   margin-top: 2px;
 }
 
+/* ---------- Choose your session (Course Mode Reference A) ---------- */
+/* Two entirely-tappable choice cards: Range Session is the screen's single
+   filled-accent primary, Course Session the secondary surface. Emphasis is
+   carried by fill and text color, never by size — both cards are the same
+   shape so neither reads as "the small one". */
+
+.session-choice-header { margin-top: var(--space-6); margin-bottom: var(--space-4); }
+.session-choice-heading {
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+.session-choice-sub {
+  margin-top: 2px;
+  font-size: var(--text-body);
+  color: var(--color-text-secondary);
+}
+
+.session-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 92px;
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-4);
+  border: none;
+  border-radius: var(--radius-lg);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
+}
+.session-choice:active { transform: scale(0.985); opacity: 0.92; }
+
+.session-choice.primary { background: var(--color-accent); color: var(--color-accent-contrast); }
+.session-choice.secondary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  color: var(--color-text-primary);
+}
+
+.session-choice-badge {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-choice-badge svg { width: 28px; height: 28px; }
+/* On the filled card the badge is a dark well punched out of the accent
+   fill; on the secondary card it is an accent outline on the surface. */
+.session-choice.primary .session-choice-badge { background: var(--color-accent-contrast); color: var(--color-accent); }
+.session-choice.secondary .session-choice-badge { border: 1.5px solid var(--color-accent); color: var(--color-accent); }
+
+.session-choice-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.session-choice-eyebrow {
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.session-choice.primary .session-choice-eyebrow { opacity: 0.7; }
+.session-choice.secondary .session-choice-eyebrow { color: var(--color-text-secondary); }
+/* --text-title, not --text-display-md: at 375px the larger step wraps
+   "Course Session" onto two lines while "Range Session" stays on one, which
+   makes the two cards read as different weights when they are meant to
+   differ only by fill. The display sizes are also reserved for hero moments
+   (ux-spec.md §2.3), and this is a card title. */
+.session-choice-title {
+  font-size: var(--text-title);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
+}
+.session-choice-desc {
+  margin-top: 2px;
+  font-size: var(--text-label);
+  line-height: var(--leading-normal);
+}
+.session-choice.primary .session-choice-desc { opacity: 0.78; }
+.session-choice.secondary .session-choice-desc { color: var(--color-text-secondary); }
+.session-choice-chevron { flex-shrink: 0; width: 22px; height: 22px; }
+.session-choice.secondary .session-choice-chevron { color: var(--color-text-tertiary); }
+
+/* ---------- Select a Course (Reference B) ---------- */
+
+.course-hero { position: relative; margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0; overflow: hidden; }
+.course-hero-img { width: 100%; height: 190px; object-fit: cover; display: block; }
+.course-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .55) 0%, rgba(0, 0, 0, .35) 45%, var(--color-bg) 100%);
+}
+.course-hero-topbar { position: absolute; top: var(--safe-top); left: 0; right: 0; padding: 0 var(--space-4); }
+.course-hero-content { position: absolute; left: var(--space-4); right: var(--space-4); bottom: var(--space-4); }
+.course-hero-title {
+  font-size: var(--text-title);
+  font-weight: var(--weight-bold);
+  color: #f5f7f8;
+  letter-spacing: -0.01em;
+}
+.course-hero-sub { margin-top: 2px; font-size: var(--text-body); color: rgba(245, 247, 248, .78); }
+
+.course-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 68px;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
+}
+.course-row:active { transform: scale(0.985); opacity: 0.92; }
+
+.course-row-badge {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+}
+.course-row-badge svg { width: 22px; height: 22px; }
+.course-row-badge.accent { background: var(--color-accent-soft); color: var(--color-accent); }
+/* The remembered-course flag is accent on the plain surface, matching
+   Reference B's recent row. */
+.course-row-badge.accent-flag { background: transparent; color: var(--color-accent); }
+
+.course-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.course-row-title {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.course-row-sub { margin-top: 1px; font-size: var(--text-caption); color: var(--color-text-secondary); }
+.course-row-chevron { flex-shrink: 0; width: 20px; height: 20px; color: var(--color-text-tertiary); }
+.course-row-distance { flex-shrink: 0; font-size: var(--text-caption); color: var(--color-text-tertiary); }
+
+.course-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: var(--space-5) 0 var(--space-2);
+}
+.course-section-eyebrow {
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+.course-view-all {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  cursor: pointer;
+}
+
+/* Results inside a sheet scroll on their own rather than growing the sheet
+   past the viewport. */
+.course-result-list { max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.course-result-list .course-row { margin-bottom: var(--space-2); }
+
+.manual-city-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: var(--space-2); }
+
 .home-setup-line {
   margin-top: var(--space-3);
   text-align: center;

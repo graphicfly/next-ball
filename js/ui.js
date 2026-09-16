@@ -1,6 +1,6 @@
 // Small shared DOM + formatting helpers used by every screen.
 
-import { getActiveSession, TRAINING_AID_LABELS } from './db.js';
+import { getActiveSession, getActiveRound, TRAINING_AID_LABELS } from './db.js';
 
 // ---------- Theme ----------
 
@@ -125,9 +125,10 @@ export function syncBottomNav(hash) {
 
   // A paused/active session waiting to be resumed is easy to lose track of
   // once you've navigated away from Home — a small dot on the Home tab
-  // keeps it discoverable from anywhere in the app.
+  // keeps it discoverable from anywhere in the app. A paused ROUND is
+  // exactly the same situation and gets the same dot.
   const homeDot = nav.querySelector('.nav-item[data-hash="#/home"] .nav-dot');
-  if (homeDot) homeDot.hidden = !getActiveSession();
+  if (homeDot) homeDot.hidden = !getActiveSession() && !getActiveRound();
 }
 
 // Traps Tab/Shift+Tab within `container` and calls `onClose` on Escape,

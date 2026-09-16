@@ -1,6 +1,5 @@
 import * as db from '../db.js';
-import { qs, fmtDate, fmtSetup, fmtSurface, fmtSwing, fmtDurationWords, escapeHtml, trapSheetFocus, todayLocalDate, nowLocalTime } from '../ui.js';
-import { clubSummaryLabel } from '../stats.js';
+import { qs, fmtSetup, fmtSurface, fmtSwing, fmtDurationWords, escapeHtml, trapSheetFocus, todayLocalDate, nowLocalTime } from '../ui.js';
 import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
@@ -14,6 +13,11 @@ function icon(paths) {
 const ICON_CLOCK = '<circle cx="12" cy="13" r="8.5" /><path d="M12 9v4l3 2" /><path d="M9.5 3.2h5" />';
 const ICON_PLAY = '<path d="M8 5.5v13l11-6.5Z" />';
 const ICON_FLAG = '<path d="M6 21V4" /><path d="M6 4.5h12l-3 4 3 4H6" />';
+// A pyramid of range balls in a tray — Reference A's Range Session badge.
+const ICON_RANGE_BALLS = '<circle cx="12" cy="7.2" r="1.9" /><circle cx="9" cy="11.4" r="1.9" /><circle cx="15" cy="11.4" r="1.9" /><path d="M4.6 15h14.8l-2.2 4.6H6.8Z" />';
+// A flagstick standing in a hole — Reference A's Course Session badge.
+const ICON_COURSE_FLAG = '<path d="M9 19.5V5.2" /><path d="M9 5.2h8.4l-2.4 3 2.4 3H9" /><ellipse cx="9" cy="19.9" rx="4.6" ry="1.7" />';
+const ICON_CHEVRON = '<path d="M9 5.5 15.5 12 9 18.5" />';
 // Small, simple line glyphs for the compact session-metadata row — deliberately
 // plainer than Active screen's illustrated context-strip icons (which carry
 // their own fills/shading); this row is secondary context on Home, not the
@@ -52,10 +56,29 @@ function metaItemHtml(iconMarkup, label) {
   return `<span class="home-active-meta-item">${iconMarkup}<span>${escapeHtml(label)}</span></span>`;
 }
 
+// Reference A's two choice cards. Both are entirely tappable with a trailing
+// chevron; Range Session is the screen's single filled-accent primary and
+// Course Session the secondary surface, because range practice remains the
+// core loop and Course Mode is an additional path, not a replacement (§4.1).
+function choiceCardHtml({ id, variant, eyebrow, title, description, iconPaths }) {
+  return `
+    <button class="session-choice ${variant}" id="${id}">
+      <span class="session-choice-badge">${icon(iconPaths)}</span>
+      <span class="session-choice-text">
+        <span class="session-choice-eyebrow">${eyebrow}</span>
+        <span class="session-choice-title">${title}</span>
+        <span class="session-choice-desc">${description}</span>
+      </span>
+      <svg class="session-choice-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_CHEVRON}</svg>
+    </button>`;
+}
+
 export function renderHome(root) {
   const activeSession = db.getActiveSession();
-  const finished = db.listFinishedSessions();
-  const recent = finished[0] || null;
+  // Only one activity may be active or paused at a time (§4.1). Both are
+  // read here so the banner can name whichever one it is, and so tapping the
+  // other choice card can warn about exactly what would end.
+  const activeRound = db.getActiveRound();
   const settings = db.getSettings();
   const hasDefaults = !!settings.lastClub;
 
@@ -101,11 +124,44 @@ export function renderHome(root) {
       </div>`;
   }
 
-  const primaryBtnHtml = !activeSession
-    ? `<button class="btn btn-primary btn-hero btn-log-shot" id="startBtn"><span>Start Session</span></button>`
-    : '';
+  // A paused round gets the same §3.12 banner treatment as a paused range
+  // session, naming the round and the hole reached so the two are never
+  // ambiguous.
+  let activeRoundCardHtml = '';
+  if (activeRound && !activeSession) {
+    const holesPlayed = db.roundHolesPlayed(activeRound.round_id);
+    const currentHole = Math.min(holesPlayed + 1, activeRound.hole_count);
+    const zeroHole = holesPlayed === 0;
+    const endLabel = zeroHole ? 'Discard Round' : 'End Round';
+    const endNote = zeroHole
+      ? 'No holes have been played.'
+      : `Round will be saved with ${holesPlayed} hole${holesPlayed === 1 ? '' : 's'}.`;
 
-  const setupLineHtml = (!activeSession && hasDefaults) ? `
+    activeRoundCardHtml = `
+      <div class="card home-active-card">
+        <div class="home-active-header">
+          <div class="home-active-icon">${icon(ICON_FLAG)}</div>
+          <div class="home-active-header-text">
+            <div class="home-active-eyebrow">Round in progress</div>
+            <div class="home-active-ball">Hole ${currentHole} of ${activeRound.hole_count}</div>
+          </div>
+        </div>
+        <div class="home-active-meta">
+          ${activeRound.course_name ? metaItemHtml(icon(ICON_FLAG), activeRound.course_name) : ''}
+        </div>
+        <div class="hairline"></div>
+        <button class="btn btn-primary btn-hero btn-log-shot" id="resumeRoundBtn">${icon(ICON_PLAY)}<span>Resume Round</span></button>
+        <button class="home-active-end tertiary-link" id="endRoundBtn" aria-label="${endLabel}" style="width:100%; margin-top:var(--space-2);">${endLabel}</button>
+        <div class="home-active-end-note">${escapeHtml(endNote)}</div>
+      </div>`;
+  }
+
+  // The setup line stays available because "Edit setup" is the only route to
+  // Session Setup for a returning golfer — tapping Range Session starts
+  // immediately from saved defaults, exactly as Start Session does today
+  // (§4.1, "existing Range Session behavior is unchanged"), so removing this
+  // would take away the one chance to change club or ball count first.
+  const setupLineHtml = (!activeSession && !activeRound && hasDefaults) ? `
     <div class="home-setup-line">
       ${settings.lastBallCount || db.DEFAULT_BALL_COUNT} balls
       <span class="setup-sep">&bull;</span>${settings.lastClub}
@@ -114,18 +170,6 @@ export function renderHome(root) {
     </div>
     <button class="home-edit-setup" id="editSetupBtn">Edit setup <span>&rsaquo;</span></button>
   ` : '';
-
-  let lastSessionHtml = '';
-  if (recent && !activeSession) {
-    const shots = db.getShotsForSession(recent.session_id);
-    lastSessionHtml = `
-      <div class="hairline"></div>
-      <button class="home-last-session" id="lastSessionRow">
-        ${icon(ICON_CLOCK)}
-        <span class="home-last-session-text">Last session &middot; ${fmtDate(recent.date)} &middot; ${shots.length} balls &middot; ${escapeHtml(clubSummaryLabel(shots, recent.default_club))}</span>
-        <span class="home-last-session-view">View <span>&rarr;</span></span>
-      </button>`;
-  }
 
   root.innerHTML = `
     <div class="screen home-screen">
@@ -139,21 +183,188 @@ export function renderHome(root) {
       </div>
 
       ${activeCardHtml}
-      ${primaryBtnHtml}
+      ${activeRoundCardHtml}
+
+      <div class="session-choice-header">
+        <div class="session-choice-heading">Choose your session</div>
+        <div class="session-choice-sub">Where do you want to play today?</div>
+      </div>
+
+      ${choiceCardHtml({
+        id: 'rangeChoiceBtn',
+        variant: 'primary',
+        eyebrow: 'PRACTICE',
+        title: 'Range Session',
+        description: 'Log shots, drills, training aids, and practice goals.',
+        iconPaths: ICON_RANGE_BALLS,
+      })}
+      ${choiceCardHtml({
+        id: 'courseChoiceBtn',
+        variant: 'secondary',
+        eyebrow: 'PLAY',
+        title: 'Course Session',
+        description: 'Track holes, score, clubs used, and on-course notes.',
+        iconPaths: ICON_COURSE_FLAG,
+      })}
+
       ${setupLineHtml}
-      ${lastSessionHtml}
       <div class="home-build-tag tiny center">${BUILD_VERSION}</div>
     </div>
   `;
 
-  qs('#startBtn', root)?.addEventListener('click', () => {
+  const startRangeSession = () => {
     if (hasDefaults) startWithDefaults(settings);
     else location.hash = '#/start';
+  };
+
+  qs('#rangeChoiceBtn', root).addEventListener('click', () => {
+    // A paused ROUND blocks a new range session — one activity at a time.
+    if (activeRound) {
+      confirmSwitchActivity(root, {
+        title: 'End your round first?',
+        body: roundEndBody(activeRound),
+        confirmLabel: 'End Round & Practice',
+        onConfirm: () => { endRound(activeRound); startRangeSession(); },
+      });
+      return;
+    }
+    if (activeSession) { location.hash = '#/active'; return; }
+    startRangeSession();
   });
+
+  qs('#courseChoiceBtn', root).addEventListener('click', () => {
+    if (activeRound) { location.hash = '#/course/round'; return; }
+    if (activeSession) {
+      confirmSwitchActivity(root, {
+        title: 'End your range session first?',
+        body: sessionEndBody(activeSession),
+        confirmLabel: 'End Session & Play',
+        onConfirm: () => {
+          finishActivity(activeSession);
+          location.hash = '#/course/select';
+        },
+      });
+      return;
+    }
+    location.hash = '#/course/select';
+  });
+
   qs('#resumeBtn', root)?.addEventListener('click', () => { location.hash = '#/active'; });
+  qs('#resumeRoundBtn', root)?.addEventListener('click', () => { location.hash = '#/course/round'; });
   qs('#editSetupBtn', root)?.addEventListener('click', () => { location.hash = '#/start'; });
-  qs('#lastSessionRow', root)?.addEventListener('click', () => { location.hash = `#/history/${recent.session_id}`; });
   qs('#endSessionBtn', root)?.addEventListener('click', () => openEndSessionSheet(activeSession, () => renderHome(root)));
+  qs('#endRoundBtn', root)?.addEventListener('click', () => openEndRoundSheet(activeRound, () => renderHome(root)));
+}
+
+function sessionEndBody(session) {
+  const shots = db.getShotsForSession(session.session_id);
+  return shots.length === 0
+    ? 'Your range session has no shots logged and will be discarded.'
+    : `Your range session will be saved with ${shots.length} shot${shots.length === 1 ? '' : 's'}.`;
+}
+
+function roundEndBody(round) {
+  const holes = db.roundHolesPlayed(round.round_id);
+  return holes === 0
+    ? 'Your round has no holes played and will be discarded.'
+    : `Your round at ${escapeHtml(round.course_name)} will be saved with ${holes} hole${holes === 1 ? '' : 's'}.`;
+}
+
+// Ends a range session the same way Home's own End Session does, including
+// discarding a session with nothing logged.
+function finishActivity(session) {
+  const shots = db.getShotsForSession(session.session_id);
+  db.finishSession(session.session_id);
+  finalizeSessionGoal(session.session_id);
+  if (shots.length === 0) {
+    try { db.deleteSession(session.session_id); } catch (e) { /* best-effort — it is at least finished */ }
+  }
+  disableWakeLock();
+  stopWeatherTracking();
+}
+
+// Same rule for a round: a round with no holes played is discarded rather
+// than kept as an empty record (§8).
+function endRound(round) {
+  const holes = db.roundHolesPlayed(round.round_id);
+  db.finishRound(round.round_id);
+  if (holes === 0) {
+    try { db.deleteRound(round.round_id); } catch (e) { /* best-effort */ }
+  }
+  disableWakeLock();
+}
+
+// §4.1: the other choice card stays tappable while something is paused, but
+// it never silently discards it — this names exactly what will end first.
+function confirmSwitchActivity(root, { title, body, confirmLabel, onConfirm }) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="switchActivityTitle" aria-describedby="switchActivityBody">
+      <h2 id="switchActivityTitle">${title}</h2>
+      <p id="switchActivityBody" class="tiny muted" style="margin-bottom:var(--space-4);">${body}<br/>Only one session or round can be in progress at a time.</p>
+      <div class="stack">
+        <button class="btn btn-outline" id="cancelSwitchBtn">Cancel</button>
+        <button class="btn btn-danger" id="confirmSwitchBtn">${confirmLabel}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  const untrap = trapSheetFocus(backdrop, close);
+  qs('#cancelSwitchBtn', backdrop).focus();
+
+  function close() {
+    untrap();
+    backdrop.remove();
+  }
+
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  qs('#cancelSwitchBtn', backdrop).addEventListener('click', close);
+  qs('#confirmSwitchBtn', backdrop).addEventListener('click', () => {
+    close();
+    onConfirm();
+  });
+}
+
+// The round-side counterpart to openEndSessionSheet — same confirmation
+// shape, same zero-activity discard rule.
+export function openEndRoundSheet(round, onDone) {
+  const holes = db.roundHolesPlayed(round.round_id);
+  const zeroHole = holes === 0;
+  const title = zeroHole ? 'Discard this round?' : 'End this round?';
+  const confirmLabel = zeroHole ? 'Discard Round' : 'End Round';
+  const body = zeroHole
+    ? 'No holes have been played. This round will be removed.'
+    : `You&rsquo;ve played ${holes} of ${round.hole_count} holes.<br/>The round will be saved with the holes recorded so far.`;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="endRoundTitle" aria-describedby="endRoundBody">
+      <h2 id="endRoundTitle">${title}</h2>
+      <p id="endRoundBody" class="tiny muted" style="margin-bottom:var(--space-4);">${body}</p>
+      <div class="stack">
+        <button class="btn btn-outline" id="cancelEndRoundBtn">Cancel</button>
+        <button class="btn btn-danger" id="confirmEndRoundBtn" aria-label="${confirmLabel}, permanently">${confirmLabel}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  const untrap = trapSheetFocus(backdrop, close);
+  qs('#cancelEndRoundBtn', backdrop).focus();
+
+  function close() {
+    untrap();
+    backdrop.remove();
+  }
+
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  qs('#cancelEndRoundBtn', backdrop).addEventListener('click', close);
+  qs('#confirmEndRoundBtn', backdrop).addEventListener('click', () => {
+    endRound(round);
+    close();
+    onDone(zeroHole);
+  });
 }
 
 // Shared by Home, Active, and Shot Entry — the single place "end/discard a

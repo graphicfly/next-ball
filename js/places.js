@@ -48,6 +48,11 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Returns the element array on success — which may legitimately be empty —
+// or null when every mirror failed. Those two cases look identical to a
+// caller that only sees a list, but they need different words in front of a
+// golfer: "no courses near you" versus "lookup is unavailable right now"
+// (docs/course-mode-spec.md §8).
 async function fetchOverpass(query, ms) {
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const controller = new AbortController();
@@ -65,16 +70,55 @@ async function fetchOverpass(query, ms) {
       clearTimeout(t);
     }
   }
-  return [];
+  return null;
 }
 
-// Returns [{ name, latitude, longitude, distance_m, place_id }], sorted
-// nearest-first, deduped by name (OSM sometimes tags the same real-world
-// facility as both a golf_course way and a separate driving_range way).
-// Never throws — an unreachable/empty response just yields [].
+// Which kind of golf facility a candidate is, from the OSM tag that matched
+// it. The query below deliberately asks for both courses and ranges, and
+// until Course Mode existed the distinction was simply discarded — so a
+// course and a driving range were indistinguishable downstream.
+//
+// Course precedence is intentional: a full course that also has a practice
+// range carries both tags, and it is a course.
+function venueTypeFromTags(tags) {
+  if (!tags) return 'unknown';
+  if (tags.leisure === 'golf_course') return 'course';
+  if (tags.golf === 'driving_range' || tags.golf === 'range') return 'range';
+  return 'unknown';
+}
+
+// Used when two elements dedupe into one venue (see below). Takes the most
+// specific classification of the two rather than whichever happened to be
+// nearer, so a facility tagged as a course by one element and a range by
+// another survives as a course.
+function mergeVenueType(a, b) {
+  if (a === 'course' || b === 'course') return 'course';
+  if (a === 'range' || b === 'range') return 'range';
+  return 'unknown';
+}
+
+// Returns [{ name, latitude, longitude, distance_m, place_id, venue_type }],
+// sorted nearest-first, deduped by name (OSM sometimes tags the same
+// real-world facility as both a golf_course way and a separate
+// driving_range way).
+//
+// Deliberately returns every venue type: Range Mode's own resolution
+// (sessionLocation.js) is unfiltered exactly as it has always been, and
+// filtering is done at the call site instead — Course Mode keeps only
+// `course` (see courseProvider.js). Never throws — an unreachable/empty
+// response just yields [].
 export async function fetchNearbyGolfVenues(lat, lon) {
+  const { venues } = await fetchNearbyGolfVenuesDetailed(lat, lon);
+  return venues;
+}
+
+// The same lookup, plus whether the service could actually be reached.
+// fetchNearbyGolfVenues() above is this function's list half and behaves
+// exactly as it always has, so the range path is unchanged.
+export async function fetchNearbyGolfVenuesDetailed(lat, lon) {
   const query = `[out:json][timeout:10];(nwr(around:${SEARCH_RADIUS_M},${lat},${lon})["leisure"="golf_course"];nwr(around:${SEARCH_RADIUS_M},${lat},${lon})["golf"="driving_range"];nwr(around:${SEARCH_RADIUS_M},${lat},${lon})["golf"="range"];);out center tags;`;
   const elements = await fetchOverpass(query, 9000);
+  if (elements === null) return { reachable: false, venues: [] };
 
   const candidates = [];
   for (const el of elements) {
@@ -89,6 +133,7 @@ export async function fetchNearbyGolfVenues(lat, lon) {
       longitude: elLon,
       distance_m: Math.round(haversineMeters(lat, lon, elLat, elLon)),
       place_id: `${el.type}/${el.id}`,
+      venue_type: venueTypeFromTags(el.tags),
     });
   }
 
@@ -97,9 +142,14 @@ export async function fetchNearbyGolfVenues(lat, lon) {
   const deduped = [];
   for (const c of candidates) {
     const dupe = deduped.find((d) => d.name.toLowerCase() === c.name.toLowerCase());
+    // The nearer element still wins on name/coordinates/place_id — only the
+    // classification merges, so a "Golf Center" tagged as a range on the
+    // element that happens to be closer isn't mistaken for range-only and
+    // filtered out of Course Mode.
     if (!dupe) deduped.push(c);
+    else dupe.venue_type = mergeVenueType(dupe.venue_type, c.venue_type);
   }
-  return deduped;
+  return { reachable: true, venues: deduped };
 }
 
 // Confidence decision over a candidate list — see places.test.js for the
