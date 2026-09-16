@@ -188,8 +188,14 @@ export function renderHome(root) {
     <button class="home-edit-setup" id="editSetupBtn">Edit setup <span>&rsaquo;</span></button>
   ` : '';
 
+  // Everything sits inside a .scroll container. Without one the screen
+  // cannot scroll at all, so once the hero plus two choice cards grew
+  // taller than the viewport — which they do on a real phone, where
+  // Safari's own chrome takes a slice off the top and bottom — the last
+  // card was simply clipped behind the bottom nav with no way to reach it.
   root.innerHTML = `
     <div class="screen home-screen">
+      <div class="scroll home-scroll">
       <div class="home-hero-bg">
         <img class="home-hero-img" src="graphics/home/range_hero.webp" alt="" />
         <div class="home-hero-scrim"></div>
@@ -227,6 +233,7 @@ export function renderHome(root) {
       ${planRowHtml}
       ${setupLineHtml}
       <div class="home-build-tag tiny center">${BUILD_VERSION}</div>
+      </div>
     </div>
   `;
 

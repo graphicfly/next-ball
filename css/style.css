@@ -2208,14 +2208,32 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 .choice-btn:active { transform: scale(0.97); }
 .choice-btn.selected { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-accent); font-weight: var(--weight-semibold); }
 
-textarea, input[type="text"], input[type="number"] {
+/* Every text-entry control, listed by exclusion rather than by naming each
+   type: an input type left out of this rule falls back to the platform's
+   own styling, which on iOS Safari means a white pill — and since the
+   global rule above sets `color: inherit`, that renders white text on a
+   white field. A search input was invisible on a real iPhone for exactly
+   this reason.
+   -webkit-appearance stops Safari re-applying its own search/number chrome
+   on top, and the 16px floor matters because iOS auto-zooms the whole page
+   when a focused field is smaller than that — which was throwing the sheet
+   and its buttons off-screen. */
+textarea,
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) {
   width: 100%;
   background: var(--color-surface);
+  color: var(--color-text-primary);
   border: 1.5px solid var(--color-divider);
   border-radius: var(--radius-md);
   padding: 12px 14px;
-  font-size: var(--text-body-lg);
+  font-size: max(16px, var(--text-body-lg));
+  -webkit-appearance: none;
+  appearance: none;
 }
+input::placeholder, textarea::placeholder { color: var(--color-text-tertiary); }
+/* Safari draws its own clear/decoration buttons inside a search field. */
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
 textarea { min-height: 76px; resize: vertical; }
 
 /* ---------- Top bar ---------- */

@@ -106,8 +106,39 @@ export async function nearbyCoursesFromDevice() {
 
 // Nominatim returns a lot of things named "golf"; only an actual course is a
 // place you can play a round.
+//
+// The field carrying the OSM key is named `category` in the jsonv2 format
+// and `class` in the older json format. Reading only `class` — as this did
+// originally — matched nothing at all against a live jsonv2 response, so
+// search silently returned no courses however good the query was. Both are
+// accepted so the filter cannot be broken again by a format change.
 function isGolfCourseResult(r) {
-  return r?.class === 'leisure' && r?.type === 'golf_course';
+  const category = r?.category ?? r?.class;
+  return category === 'leisure' && r?.type === 'golf_course';
+}
+
+// Words that carry no identifying information in a golf search.
+const GENERIC_SEARCH_WORDS = new Set(['golf', 'course', 'courses', 'club', 'the', 'and', 'in', 'at', 'of', 'a']);
+
+function meaningfulTokens(query) {
+  return query.toLowerCase().split(/[^a-z0-9]+/i)
+    .filter((w) => w.length >= 3 && !GENERIC_SEARCH_WORDS.has(w));
+}
+
+// Nominatim's free-text ranking is unreliable for this feature: "oakmont
+// golf" has been observed returning Merion and Wheeling Park, and
+// "golf course in reston national" returns courses in Manila. Offering
+// those as matches would be worse than finding nothing, since the golfer
+// could plausibly tap one and start a round at the wrong course.
+//
+// So a result must actually match something that was typed. Matching
+// against the full display name, not just the course name, is what keeps a
+// search by city working — §4.2 offers "a course name or city", and a
+// course in Vienna rarely has "Vienna" in its own name.
+function isRelevant(result, tokens) {
+  if (!tokens.length) return true; // nothing distinctive was typed to match on
+  const haystack = `${result.name || ''} ${result.display_name || ''}`.toLowerCase();
+  return tokens.some((t) => haystack.includes(t));
 }
 
 // Nominatim's address object names the settlement differently depending on
@@ -124,6 +155,21 @@ export async function searchCourses(query) {
   const q = typeof query === 'string' ? query.trim() : '';
   if (!q) return { status: LOOKUP_STATUS.NO_RESULTS, courses: [] };
 
+  const tokens = meaningfulTokens(q);
+  const direct = await runSearch(q, tokens);
+  if (direct.status !== LOOKUP_STATUS.NO_RESULTS) return direct;
+
+  // A bare course name usually matches the SETTLEMENT of that name rather
+  // than the course — searching "oakmont" returns ten places called Oakmont
+  // and no golf at all. Nominatim's special-phrase syntax asks for the
+  // feature type directly and does find it, so it's worth one retry before
+  // reporting nothing. Sequential, so this stays within the roughly one
+  // request per second the usage policy asks for (§11.4).
+  if (/golf/i.test(q)) return direct;
+  return runSearch(`golf course in ${q}`, tokens);
+}
+
+async function runSearch(q, tokens = []) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {
@@ -136,6 +182,7 @@ export async function searchCourses(query) {
 
     const courses = data
       .filter(isGolfCourseResult)
+      .filter((r) => isRelevant(r, tokens))
       .map((r) => toCourse({
         // Nominatim's display_name is a full postal path; the first segment
         // is the venue's own name.

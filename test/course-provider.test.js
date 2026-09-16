@@ -31,13 +31,17 @@ function overpassEl(name, lat, lon, id, tags = { leisure: 'golf_course' }) {
   return { type: 'way', id, lat, lon, tags: { name, ...tags } };
 }
 
+// Shaped like a REAL jsonv2 response, which carries `category` — not
+// `class`, which only the older json format uses. The original fixture used
+// `class`, which meant these tests passed against a mock that no live
+// response ever looks like, and the filter matched nothing in production.
 function nominatimResult(name, { osm_type = 'way', osm_id = 99, city = 'Vienna', state = 'Virginia', cls = 'leisure', type = 'golf_course' } = {}) {
   return {
     name,
     display_name: `${name}, ${city}, ${state}, USA`,
     lat: '38.9',
     lon: '-77.3',
-    class: cls,
+    category: cls,
     type,
     osm_type,
     osm_id,
@@ -264,6 +268,66 @@ describe('Search states', () => {
     const { status, courses } = await searchCourses('zzzz');
     assert.equal(status, LOOKUP_STATUS.NO_RESULTS);
     assert.deepEqual(courses, []);
+  });
+
+  test('a bare place name that finds no golf retries for the feature itself', async () => {
+    await resetDB();
+    const { searchCourses, LOOKUP_STATUS } = await import('../js/courseProvider.js');
+
+    // What Nominatim really does with "oakmont": ten settlements, no golf.
+    // The course only surfaces once the query names the feature type.
+    const queries = [];
+    globalThis.fetch = async (url) => {
+      const q = decodeURIComponent(String(url).match(/[?&]q=([^&]*)/)[1]);
+      queries.push(q);
+      const hits = /golf course in/i.test(q)
+        ? [nominatimResult('Oakmont Golf Club', { osm_id: 7 })]
+        : [{ name: 'Oakmont', display_name: 'Oakmont, PA', lat: '40.5', lon: '-79.8', category: 'place', type: 'hamlet', osm_type: 'node', osm_id: 1 }];
+      return { ok: true, json: async () => hits };
+    };
+
+    const { status, courses } = await searchCourses('oakmont');
+    assert.equal(status, LOOKUP_STATUS.OK);
+    assert.deepEqual(courses.map((c) => c.name), ['Oakmont Golf Club']);
+    assert.deepEqual(queries, ['oakmont', 'golf course in oakmont']);
+  });
+
+  test('a query that already says golf is not retried', async () => {
+    await resetDB();
+    const { searchCourses } = await import('../js/courseProvider.js');
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return { ok: true, json: async () => [] }; };
+
+    await searchCourses('oakmont golf club');
+    assert.equal(calls, 1);
+  });
+
+  test('a successful first search is never retried', async () => {
+    await resetDB();
+    const { searchCourses } = await import('../js/courseProvider.js');
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return { ok: true, json: async () => [nominatimResult('Reston National', { osm_id: 3 })] };
+    };
+
+    await searchCourses('reston');
+    assert.equal(calls, 1);
+  });
+
+  test('the live jsonv2 field name is what the filter reads', async () => {
+    await resetDB();
+    const { searchCourses, LOOKUP_STATUS } = await import('../js/courseProvider.js');
+    // jsonv2 carries `category`; the older json format carries `class`.
+    // Both must pass the filter.
+    mockFetch({ nominatim: [
+      { name: 'Category Course', display_name: 'Category Course, VA', lat: '38.9', lon: '-77.3', category: 'leisure', type: 'golf_course', osm_type: 'way', osm_id: 1 },
+      { name: 'Class Course', display_name: 'Class Course, VA', lat: '38.9', lon: '-77.3', class: 'leisure', type: 'golf_course', osm_type: 'way', osm_id: 2 },
+    ] });
+
+    const { status, courses } = await searchCourses('course');
+    assert.equal(status, LOOKUP_STATUS.OK);
+    assert.deepEqual(courses.map((c) => c.name), ['Category Course', 'Class Course']);
   });
 
   test('a failing search service reports unavailable, never throws', async () => {
