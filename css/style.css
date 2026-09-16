@@ -1032,6 +1032,226 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 }
 .hole-actions .btn-outline { flex: 0 1 42%; }
 
+/* ---------- Round Summary (§4.5, Reference D) ---------- */
+/* A reward, not a report: one hero number, and deliberately no date,
+   location, duration or secondary statistics competing with it. */
+
+.round-hero {
+  position: relative;
+  margin: 0 calc(var(--space-4) * -1) var(--space-5);
+  overflow: hidden;
+}
+.round-hero-img { width: 100%; height: 218px; object-fit: cover; display: block; }
+.round-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .35) 0%, rgba(0, 0, 0, .55) 55%, var(--color-bg) 100%);
+}
+.round-hero-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-4);
+}
+.round-hero-eyebrow {
+  font-size: var(--text-body);
+  color: rgba(245, 247, 248, .8);
+}
+.round-hero-score { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-1); }
+.round-hero-total {
+  font-size: var(--text-display-xl);
+  font-weight: var(--weight-heavy);
+  color: #f5f7f8;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+/* The hairline rule Reference D uses to separate score from score-to-par. */
+.round-hero-divider { width: 1px; height: 46px; background: rgba(245, 247, 248, .3); }
+.round-hero-topar {
+  font-size: var(--text-display-lg);
+  font-weight: var(--weight-bold);
+  color: rgba(245, 247, 248, .82);
+  letter-spacing: -0.01em;
+}
+.round-hero-line { margin-top: var(--space-2); font-size: var(--text-body); color: rgba(245, 247, 248, .8); }
+
+/* Nine per row. Unlike the hole-entry strip these cells are display only,
+   not tap targets, so --tap-min does not apply and Reference D's single row
+   of nine is achievable; an 18-hole round simply wraps to two rows. */
+.score-strip {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: var(--space-2) 4px;
+  justify-items: center;
+}
+.score-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.score-cell-num { font-size: var(--text-caption); color: var(--color-text-tertiary); line-height: 1; }
+.score-cell-ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-divider);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+.score-cell-ring.under { border-color: var(--color-accent); color: var(--color-accent); }
+.score-cell-ring.over { border-color: var(--color-warning); color: var(--color-warning); }
+
+/* The screen's bridge back to practice and its most important secondary
+   action — the whole card is the tap target, never a button inside it. */
+.next-practice-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 92px;
+  padding: var(--space-4) var(--space-5);
+  margin: var(--space-5) 0 var(--space-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--color-accent-soft) 0%, rgba(35, 214, 127, .06) 100%);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
+}
+.next-practice-card:active { transform: scale(0.985); opacity: 0.92; }
+@media (prefers-reduced-motion: reduce) {
+  .next-practice-card { background: var(--color-accent-soft); }
+}
+.next-practice-badge {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  color: var(--color-accent);
+}
+.next-practice-badge svg { width: 24px; height: 24px; }
+.next-practice-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.next-practice-eyebrow {
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-accent);
+}
+.next-practice-title {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.next-practice-desc {
+  margin-top: 2px;
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+}
+.next-practice-chevron { flex-shrink: 0; width: 20px; height: 20px; color: var(--color-accent); }
+
+/* ---------- Next Practice screen (§4.6, Reference E) ---------- */
+/* The focus block sits directly on the background rather than in a card:
+   it is the screen's subject, not one item among several. */
+
+.focus-block { margin: var(--space-5) 0 var(--space-6); }
+.focus-eyebrow {
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+.focus-title {
+  margin-top: var(--space-1);
+  font-size: var(--text-title);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+.focus-rationale { margin-top: 2px; font-size: var(--text-body); color: var(--color-text-secondary); }
+.focus-goal { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); color: var(--color-accent); font-size: var(--text-body); }
+.focus-goal svg { width: 20px; height: 20px; flex-shrink: 0; }
+.focus-goal b { font-weight: var(--weight-semibold); }
+
+.plan-steps { margin-top: var(--space-3); }
+.plan-step { display: flex; gap: var(--space-3); position: relative; padding-bottom: var(--space-4); }
+.plan-step:last-child { padding-bottom: 0; }
+/* The dashed accent rail connecting the numbered steps. */
+.plan-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 32px;
+  bottom: 8px;
+  border-left: 1.5px dashed var(--color-accent);
+  opacity: 0.55;
+}
+.plan-step-num {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-accent);
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  background: var(--color-surface);
+}
+.plan-step-text { display: flex; flex-direction: column; padding-top: 4px; }
+.plan-step-title { font-size: var(--text-body-lg); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
+.plan-step-detail { margin-top: 1px; font-size: var(--text-caption); color: var(--color-text-secondary); }
+
+/* ---------- Explore Round (§9) ---------- */
+
+.hole-detail-head,
+.hole-detail-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+}
+.hole-detail-head {
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-divider);
+}
+.hole-detail-row {
+  padding: var(--space-3) 0 2px;
+  font-size: var(--text-body);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.hole-detail-num { text-align: left; color: var(--color-text-tertiary); font-size: var(--text-caption); }
+.hole-detail-score { font-weight: var(--weight-semibold); color: var(--color-text-primary); }
+.hole-detail-score.over { color: var(--color-warning); }
+.hole-detail-clubs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 0 var(--space-3) 52px; }
+.hole-detail-club {
+  font-size: var(--text-caption);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+
 .home-setup-line {
   margin-top: var(--space-3);
   text-align: center;

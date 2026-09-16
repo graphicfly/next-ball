@@ -11,6 +11,8 @@ import { renderCourseSelect } from './screens/courseSelect.js';
 import { renderCourseSetup } from './screens/courseSetup.js';
 import { renderCourseRound } from './screens/courseRound.js';
 import { renderRoundSummary } from './screens/roundSummary.js';
+import { renderRoundExplore } from './screens/roundExplore.js';
+import { renderPracticePlan } from './screens/practicePlan.js';
 import { renderTrends } from './screens/trends.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getSettings } from './db.js';
@@ -42,6 +44,8 @@ const routes = [
   { pattern: /^#\/course\/setup$/, render: () => renderCourseSetup(root) },
   { pattern: /^#\/course\/round$/, render: () => renderCourseRound(root) },
   { pattern: /^#\/course\/summary\/([^/]+)$/, render: (m) => renderRoundSummary(root, m[1]) },
+  { pattern: /^#\/course\/explore\/([^/]+)$/, render: (m) => renderRoundExplore(root, m[1]) },
+  { pattern: /^#\/course\/plan\/([^/]+)$/, render: (m) => renderPracticePlan(root, m[1]) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];
