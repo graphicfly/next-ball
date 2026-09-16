@@ -7,6 +7,8 @@ import {
   getClubQuickPicks, getBallCountQuickPicks, getLastRealSetupDefaults,
   recordClubQuickPicks, recordBallCountQuickPicks,
 } from '../setupPersonalization.js';
+import { getPendingPlanId, clearPendingPlan } from '../state.js';
+import { planBallCount } from '../roundAnalysis.js';
 
 function icon(paths) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
@@ -62,13 +64,24 @@ export function renderStart(root) {
   const date = todayLocalDate();
   const time = nowLocalTime();
 
+  // When the golfer chose to practice a saved plan, this screen opens
+  // pre-filled from it (§7.8). Only two fields are derived, and only where
+  // the plan genuinely carries the information: the ball count the steps add
+  // up to, and a club when the focus actually names one. Nothing else is
+  // guessed — the app does not infer a wedge from "short game" — and every
+  // value stays fully editable, because a plan is a starting point rather
+  // than a lock.
+  const pendingPlan = getPendingPlanId() ? db.getPlan(getPendingPlanId()) : null;
+  const planBalls = pendingPlan ? planBallCount(pendingPlan.steps) : null;
+  const planClub = pendingPlan?.focus_type === 'club' ? pendingPlan.focus_club : null;
+
   const state = {
     // A brand-new golfer with no history and no saved settings has no
     // remembered club to fall back to — default to the first quick pick so
     // the screen never starts with nothing selected (core principle: most
     // of the setup should already be correct when the screen opens).
-    club: defaults.club || clubQuickPicks[0],
-    ballCount: defaults.ballCount,
+    club: planClub || defaults.club || clubQuickPicks[0],
+    ballCount: planBalls || defaults.ballCount,
     setup: defaults.setup,
     surface: defaults.surface,
     swing: defaults.swing,
@@ -249,6 +262,15 @@ export function renderStart(root) {
         practice_focus: state.focus,
         session_notes: state.notes,
       });
+
+      // The plan becomes `started` here, at the one moment the session it
+      // points at actually exists — marking it earlier (when the golfer
+      // picked it on Home) would strand it as "in progress with no session"
+      // if they backed out of this screen instead of starting.
+      if (pendingPlan) {
+        db.resolvePlan(pendingPlan.plan_id, 'started', { startedSessionId: session.session_id });
+        clearPendingPlan();
+      }
 
       const patch = {};
       if (state.drill !== db.DEFAULT_DRILL) patch.current_drill = state.drill;

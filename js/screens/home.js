@@ -4,6 +4,8 @@ import { enableWakeLock, disableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking, stopWeatherTracking } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
 import { finalizeSessionGoal } from '../sessionAnalysis.js';
+import { isRangePracticable } from '../roundAnalysis.js';
+import { setPendingPlanId } from '../state.js';
 import { BUILD_VERSION } from '../version.js';
 
 function icon(paths) {
@@ -254,6 +256,13 @@ export function renderHome(root) {
       return;
     }
     if (activeSession) { location.hash = '#/active'; return; }
+    // §7.7: the sheet appears ONLY when there is an outstanding plan that
+    // can actually be practiced on a range. For the majority case — no plan
+    // — this tap goes straight through exactly as it always has.
+    if (activePlan && activePlan.status === 'saved' && isRangePracticable(activePlan.focus_type)) {
+      openRangeStartSheet(activePlan, startRangeSession);
+      return;
+    }
     startRangeSession();
   });
 
@@ -282,6 +291,67 @@ export function renderHome(root) {
   qs('#endRoundBtn', root)?.addEventListener('click', () => openEndRoundSheet(activeRound, () => renderHome(root)));
 }
 
+// §7.7 — the choice between practicing the saved plan and an ordinary
+// session. The plan is listed first and carries the accent, because it is
+// the new information and the only reason this sheet exists; the normal
+// session is a plain row directly beneath it.
+//
+// The plan is never forced: there is no auto-apply, no pre-selected option,
+// and choosing the normal session leaves the plan completely untouched —
+// still outstanding, still offered next time.
+function openRangeStartSheet(plan, startNormal) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rangeStartTitle">
+      <h2 id="rangeStartTitle">Start a range session</h2>
+      <button class="plan-start-option" id="usePlanBtn">
+        <span class="plan-start-badge">${icon(ICON_TARGET_SMALL)}</span>
+        <span class="plan-start-text">
+          <span class="plan-start-eyebrow">Use saved practice plan</span>
+          <span class="plan-start-title">${escapeHtml(plan.focus_title)}</span>
+          <span class="plan-start-sub">Created from your last round</span>
+        </span>
+        <span class="plan-start-chevron">&rsaquo;</span>
+      </button>
+      <button class="plan-start-option plain" id="normalSessionBtn">
+        <span class="plan-start-text">
+          <span class="plan-start-title">Start Normal Range Session</span>
+        </span>
+        <span class="plan-start-chevron">&rsaquo;</span>
+      </button>
+      <button class="btn btn-outline" id="cancelRangeStartBtn" style="margin-top:var(--space-2);">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  const untrap = trapSheetFocus(backdrop, close);
+
+  function close() {
+    untrap();
+    backdrop.remove();
+  }
+
+  // Dismissing never applies the plan and never blocks the golfer — it
+  // simply returns them to Home with everything as it was.
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  qs('#cancelRangeStartBtn', backdrop).addEventListener('click', close);
+
+  qs('#normalSessionBtn', backdrop).addEventListener('click', () => {
+    close();
+    startNormal();
+  });
+
+  qs('#usePlanBtn', backdrop).addEventListener('click', () => {
+    close();
+    // Session Setup is where the plan becomes a session: it pre-fills from
+    // the plan and stays fully editable (§7.8). The plan is marked started
+    // there, at the moment the session actually exists, so backing out of
+    // Setup cannot strand it.
+    setPendingPlanId(plan.plan_id);
+    location.hash = '#/start';
+  });
+}
+
 function sessionEndBody(session) {
   const shots = db.getShotsForSession(session.session_id);
   return shots.length === 0
@@ -305,8 +375,23 @@ function finishActivity(session) {
   if (shots.length === 0) {
     try { db.deleteSession(session.session_id); } catch (e) { /* best-effort — it is at least finished */ }
   }
+  resolvePlanForFinishedSession(session.session_id, shots.length);
   disableWakeLock();
   stopWeatherTracking();
+}
+
+// Completion is automatic — the golfer is never asked whether they finished
+// their practice, and the app never grades adherence (§7.11).
+//
+// A session discarded with nothing logged is not practice, so its plan
+// returns to `saved` rather than being marked completed: abandoning a
+// session must never claim the plan was done, and the plan should still be
+// waiting the next time the golfer goes to the range.
+export function resolvePlanForFinishedSession(sessionId, shotCount) {
+  const plan = db.getPlanForSession(sessionId);
+  if (!plan || plan.status !== 'started') return null;
+  if (shotCount > 0) return db.resolvePlan(plan.plan_id, 'completed');
+  return db.reopenPlan(plan.plan_id);
 }
 
 // Same rule for a round: a round with no holes played is discarded rather
@@ -441,13 +526,11 @@ export function openEndSessionSheet(session, onDone) {
   qs('#cancelEndBtn', backdrop).addEventListener('click', close);
 
   qs('#confirmEndBtn', backdrop).addEventListener('click', () => {
-    db.finishSession(session.session_id);
-    finalizeSessionGoal(session.session_id);
-    if (zeroShot) {
-      try { db.deleteSession(session.session_id); } catch (e) { /* best-effort — session is at least finished/inactive either way */ }
-    }
-    disableWakeLock();
-    stopWeatherTracking();
+    // Goes through the one shared implementation rather than repeating it.
+    // This sheet used to carry its own copy, which is exactly how a newly
+    // added end-of-session step (resolving the practice plan) ended up
+    // running on one finish path and not the other.
+    finishActivity(session);
     close();
     onDone(zeroShot);
   });

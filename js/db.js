@@ -1494,11 +1494,24 @@ export function getPlanForRound(roundId) {
   return loadPlans().find((p) => p.round_id === roundId) || null;
 }
 
+export function getPlan(planId) {
+  return loadPlans().find((p) => p.plan_id === planId) || null;
+}
+
 // At most one plan is ever outstanding. 'saved' (waiting to be practiced)
 // and 'started' (a range session is running it) both count as outstanding;
-// everything else is concluded.
+// everything else is concluded (§7.1). Only an outstanding plan is ever
+// surfaced anywhere in the app.
 export function getActivePlan() {
   return loadPlans().find((p) => p.status === 'saved' || p.status === 'started') || null;
+}
+
+// The plan a given range session is running, if any. The link lives on the
+// plan rather than the session so that sessions keep exactly the shape they
+// have always had — nothing in the range path needs to know plans exist.
+export function getPlanForSession(sessionId) {
+  if (!sessionId) return null;
+  return loadPlans().find((p) => p.started_session_id === sessionId) || null;
 }
 
 // Creates a saved plan from the focus object roundAnalysis.js produced.
@@ -1526,6 +1539,11 @@ export function createPlan(roundId, focus) {
     // Which rule in roundAnalysis.js produced this focus (putting, short
     // game, full swing, a named club, or maintenance).
     focus_type: focus.signal ?? null,
+    // The club a `club` focus names. Not in §7.3's table, but §7.8 requires
+    // Session Setup to pre-fill the club "where the plan names one" — which
+    // is only possible if the plan carries it. Null for every other focus
+    // type, where no club is named and none is guessed.
+    focus_club: focus.club ?? null,
     focus_title: focus.focus_title,
     focus_rationale: focus.focus_rationale,
     goal_text: focus.goal_text,
@@ -1542,6 +1560,21 @@ export function createPlan(roundId, focus) {
   plans.push(record);
   saveIndex();
   return record;
+}
+
+// Returns a started plan to 'saved' and forgets the session that was
+// running it — for a session abandoned with nothing logged. The plan was
+// never practiced, so it must not be left claiming to be in progress, and
+// must not be marked completed either.
+export function reopenPlan(planId) {
+  const plans = loadPlans();
+  const p = plans.find((x) => x.plan_id === planId);
+  if (!p) return null;
+  p.status = 'saved';
+  p.resolved_at = null;
+  p.started_session_id = null;
+  saveIndex();
+  return p;
 }
 
 // Moves a plan out of 'saved'/'started' into a terminal (or superseding)

@@ -79,3 +79,19 @@ export function getPendingCourseId() {
 export function clearPendingCourse() {
   pendingCourseId = null;
 }
+
+// The practice plan the golfer chose to practice, held only between that
+// choice and the moment Session Setup actually creates the session. It is
+// transient on purpose: the plan itself is already persisted, and if this is
+// lost to a refresh the plan simply stays `saved` and can be started again —
+// which is far better than a plan stuck at `started` with no session.
+let pendingPlanId = null;
+export function setPendingPlanId(planId) {
+  pendingPlanId = planId;
+}
+export function getPendingPlanId() {
+  return pendingPlanId;
+}
+export function clearPendingPlan() {
+  pendingPlanId = null;
+}

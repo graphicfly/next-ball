@@ -279,6 +279,27 @@ export function practiceFocus(round, holes) {
   };
 }
 
+// Whether a focus can actually be practiced as a range session.
+//
+// A putting focus cannot (§11.8): a range session logs strike, direction,
+// height and distance, and there is no putting session type — so offering
+// "start this practice" on a putting plan would open a session that has
+// nothing to do with the plan. Such a plan stays useful as a written
+// reminder; it simply has no start action.
+export function isRangePracticable(focusType) {
+  return focusType !== 'putting';
+}
+
+// Ball count to pre-fill Session Setup with: the sum of the steps that
+// actually count balls (§7.8). Steps measured in challenges rather than
+// balls contribute nothing, and a plan made only of challenges yields null
+// so the golfer's own default is kept rather than a fabricated number.
+export function planBallCount(steps) {
+  if (!Array.isArray(steps)) return null;
+  const total = steps.reduce((sum, s) => sum + (Number(s?.ball_count) || 0), 0);
+  return total > 0 ? total : null;
+}
+
 function round1(n) {
   return Math.round(n * 10) / 10;
 }
