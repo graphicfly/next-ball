@@ -1297,6 +1297,62 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 .plan-step-detail { margin-top: 1px; font-size: var(--text-caption); color: var(--color-text-secondary); }
 
 /* ---------- Explore Round (§9) ---------- */
+/* One quiet identity line — no card, no hero, no photo. The hero moment
+   already happened on Round Summary and is never repeated here. */
+.round-identity {
+  margin: var(--space-2) 0 var(--space-5);
+  font-size: var(--text-body);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.round-identity .sep { color: var(--color-text-tertiary); margin: 0 6px; }
+
+/* The top-level story: always visible, never collapsed, because it is the
+   screen's answer to "where did the strokes go?" and the reason a golfer
+   gets value without opening anything. */
+.stroke-story {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+}
+.stroke-story-eyebrow {
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+.stroke-story-text {
+  margin-top: var(--space-2);
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  line-height: var(--leading-normal);
+}
+
+/* A generated sentence inside a section. Factual and unranked by design — a
+   claim about association, never causation (§9.7). */
+.xs-note {
+  margin-top: var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+}
+
+/* Comparison pill (ux-spec.md §3.5). Improved reads accent; flat or worse
+   reads neutral — never red, because a worse round is not an error. */
+.compare-pill {
+  display: inline-block;
+  margin-top: var(--space-3);
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+}
+.compare-pill.improved { background: var(--color-accent-soft); color: var(--color-accent); }
 
 .hole-detail-head,
 .hole-detail-row {

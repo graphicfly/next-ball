@@ -17,6 +17,8 @@
 //   OK:    "Your 9i appeared on several of your higher-scoring holes."
 //   OK:    "Extra shots around the green added strokes today."
 
+import { clubBreakdown } from './stats.js';
+
 // A hole played to regulation is two putts plus (par - 2) full swings, with
 // nothing dropped around the green. That baseline is what the stroke
 // decomposition below measures against.
@@ -298,6 +300,241 @@ export function planBallCount(steps) {
   if (!Array.isArray(steps)) return null;
   const total = steps.reduce((sum, s) => sum + (Number(s?.ball_count) || 0), 0);
   return total > 0 ? total : null;
+}
+
+// ---------- Explore Round (§9) ----------
+//
+// Every function below is bounded by §6's fields and the §7.7 wording rules:
+// association is never causation, a club is only ever described as having
+// appeared on holes, and no claim is made below its sample threshold (§9.5).
+
+// A 3-hole window must not be half the round, so stretches are not a
+// finding below 6 holes.
+export const MIN_HOLES_FOR_STRETCH = 6;
+const STRETCH_LENGTH = 3;
+
+// A row in the club table is a recorded fact and needs 2 holes; a narrative
+// sentence is a claim and needs 3 (§9.5).
+export const MIN_HOLES_FOR_CLUB_SENTENCE = 3;
+
+// One bad range day is not a tendency (§9.5).
+export const MIN_RANGE_SHOTS_FOR_BRIDGE = 30;
+export const MIN_RANGE_SESSIONS_FOR_BRIDGE = 3;
+// A club must be reliable on the range before the bridge mentions it — this
+// is range data, where contact quality genuinely is measured.
+const RELIABLE_RANGE_SOLID_PCT = 60;
+export const MAX_BRIDGE_CLUBS = 2;
+
+// The screen's always-visible answer to "where did the strokes go?" (§9.2).
+//
+// Names only the single largest bucket — never a ranked list — and says so
+// plainly when two are within a stroke of each other rather than inventing a
+// winner. A round at or under par reports what held up instead of
+// manufacturing a loss.
+export function strokeStory(holes) {
+  const b = strokeBreakdown(holes);
+  if (!b.hasPar || !b.holesPlayed) return null;
+
+  const holeWord = `${b.holesPlayed} hole${b.holesPlayed === 1 ? '' : 's'}`;
+  if (b.toPar <= 0) {
+    return {
+      kind: 'held_up',
+      text: `You played ${holeWord} in ${b.toPar === 0 ? 'even par' : `${b.toPar} under par`}.`,
+    };
+  }
+
+  const buckets = [
+    { key: 'putting', label: 'Putting', value: b.puttsOver },
+    { key: 'short_game', label: 'Greenside strokes', value: b.shortGameOver },
+    { key: 'full_swing', label: 'Full swings', value: b.fullSwingOver },
+  ].filter((x) => x.value > 0).sort((a, b2) => b2.value - a.value);
+
+  if (!buckets.length) {
+    return { kind: 'held_up', text: `You played ${holeWord} in ${formatToPar(b.toPar)}.` };
+  }
+
+  const [top, second] = buckets;
+  if (second && top.value - second.value <= 1) {
+    return {
+      kind: 'tied',
+      text: `${top.label} and ${second.label.toLowerCase()} each added about ${formatToPar(top.value)}.`,
+    };
+  }
+  return {
+    kind: top.key,
+    text: `${top.label} accounted for ${formatToPar(top.value)} of your ${formatToPar(b.toPar)}.`,
+  };
+}
+
+// Best and worst consecutive 3-hole stretches by score to par. Returns null
+// below MIN_HOLES_FOR_STRETCH, where the window would be half the round.
+export function holeStretches(holes) {
+  const scored = holes.filter((h) => h.par != null);
+  if (scored.length < MIN_HOLES_FOR_STRETCH) return null;
+
+  let best = null;
+  let worst = null;
+  for (let i = 0; i + STRETCH_LENGTH <= scored.length; i++) {
+    const window = scored.slice(i, i + STRETCH_LENGTH);
+    const toPar = window.reduce((s, h) => s + (h.strokes - h.par), 0);
+    const entry = { from: window[0].hole_number, to: window[STRETCH_LENGTH - 1].hole_number, toPar };
+    if (!best || toPar < best.toPar) best = entry;
+    if (!worst || toPar > worst.toPar) worst = entry;
+  }
+  // A single flat round has one stretch that is both; reporting the same
+  // holes as best and worst says nothing.
+  if (best && worst && best.from === worst.from) worst = null;
+  return { best, worst };
+}
+
+// Holes ranked by greenside strokes, heaviest first — a plain reading of
+// short_game_strokes, with no claim about why.
+export function shortGameHoles(holes) {
+  return holes
+    .filter((h) => h.short_game_strokes > 0)
+    .sort((a, b) => b.short_game_strokes - a.short_game_strokes || a.hole_number - b.hole_number);
+}
+
+export function puttingSummary(holes) {
+  const t = roundTotals(holes);
+  const threePutts = holes.filter((h) => h.putts >= 3);
+  return {
+    total: t.putts,
+    perHole: t.holesPlayed ? round1(t.putts / t.holesPlayed) : 0,
+    threePutts,
+    // Only mentioned when at least one exists (§9.5).
+    hasThreePutts: threePutts.length > 0,
+  };
+}
+
+// Which clubs appeared and on how many holes — a record of what was logged,
+// never a ranking by quality.
+export function clubUsage(holes) {
+  const counts = new Map();
+  for (const h of holes) {
+    for (const club of h.clubs_used || []) {
+      counts.set(club, (counts.get(club) || 0) + 1);
+    }
+  }
+  const associations = new Map(clubAssociations(holes).map((a) => [a.club, a]));
+  return [...counts.entries()]
+    .map(([club, holeCount]) => ({
+      club,
+      holeCount,
+      avgToPar: associations.get(club)?.avgToPar ?? null,
+      margin: associations.get(club)?.margin ?? null,
+    }))
+    .sort((a, b) => b.holeCount - a.holeCount || a.club.localeCompare(b.club));
+}
+
+// Range reliability paired with course appearance (§9.3 §5, §9.7).
+//
+// Returns two independent facts about the same club, never joined by any
+// causal word. Both sides must clear their own threshold: enough range
+// evidence that the club is genuinely reliable there, and enough holes this
+// round for a claim rather than a coincidence.
+export function rangeCourseBridge(holes, rangeSessions, shotsBySession) {
+  const usage = clubUsage(holes).filter((c) => c.holeCount >= MIN_HOLES_FOR_CLUB_SENTENCE);
+  if (!usage.length) return [];
+
+  const shotsByClub = new Map();
+  const sessionsByClub = new Map();
+  for (const session of rangeSessions) {
+    const shots = shotsBySession(session.session_id) || [];
+    const clubsThisSession = new Set();
+    for (const s of shots) {
+      if (!s.club) continue;
+      if (!shotsByClub.has(s.club)) shotsByClub.set(s.club, []);
+      shotsByClub.get(s.club).push(s);
+      clubsThisSession.add(s.club);
+    }
+    for (const club of clubsThisSession) {
+      sessionsByClub.set(club, (sessionsByClub.get(club) || 0) + 1);
+    }
+  }
+
+  const out = [];
+  for (const entry of usage) {
+    const shots = shotsByClub.get(entry.club) || [];
+    const sessionCount = sessionsByClub.get(entry.club) || 0;
+    if (shots.length < MIN_RANGE_SHOTS_FOR_BRIDGE) continue;
+    if (sessionCount < MIN_RANGE_SESSIONS_FOR_BRIDGE) continue;
+
+    const [breakdown] = clubBreakdown(shots);
+    if (!breakdown || breakdown.solidPct < RELIABLE_RANGE_SOLID_PCT) continue;
+
+    out.push({
+      club: entry.club,
+      rangeShots: shots.length,
+      rangeSessions: sessionCount,
+      solidPct: breakdown.solidPct,
+      holeCount: entry.holeCount,
+      avgToPar: entry.avgToPar,
+    });
+  }
+  return out.sort((a, b) => b.solidPct - a.solidPct).slice(0, MAX_BRIDGE_CLUBS);
+}
+
+// Comparable means the SAME course and the SAME number of holes played
+// (§9.8). Course difficulty is not captured, so a round at one course can
+// never be compared with a round at another, and a 9 is never compared with
+// an 18. Each prior round is { course_id, holesPlayed, toPar, putts }.
+export function comparableRounds(round, holesPlayed, priorRounds = []) {
+  if (!round.course_id) return [];
+  return priorRounds.filter((p) => p.course_id === round.course_id && p.holesPlayed === holesPlayed);
+}
+
+// Factual deltas only (§9.8) — never "you're improving", which is a trend
+// claim and Trends' job. Returns null rather than a placeholder when there
+// is nothing comparable.
+export function scoringComparison(round, holes, priorRounds = []) {
+  const t = roundTotals(holes);
+  if (!t.hasPar) return null;
+  const comparable = comparableRounds(round, t.holesPlayed, priorRounds);
+  if (!comparable.length) return null;
+
+  if (comparable.length >= 3) {
+    const avg = comparable.reduce((s, p) => s + p.toPar, 0) / comparable.length;
+    const diff = Math.round((t.toPar - avg) * 10) / 10;
+    return {
+      kind: 'recent',
+      diff,
+      label: diff === 0
+        ? `Level with your average of ${comparable.length} rounds here`
+        : `${Math.abs(diff)} ${diff < 0 ? 'better' : 'worse'} than your average of ${comparable.length} rounds here`,
+      improved: diff < 0,
+    };
+  }
+
+  const [last] = comparable;
+  const diff = t.toPar - last.toPar;
+  return {
+    kind: 'last',
+    diff,
+    label: diff === 0
+      ? 'Same as your last round here'
+      : `${Math.abs(diff)} ${diff < 0 ? 'better' : 'worse'} than your last round here`,
+    improved: diff < 0,
+  };
+}
+
+// Putts against the golfer's own average at this course. Needs 3 comparable
+// rounds — one prior round is not an average (§9.8).
+export function puttingComparison(round, holes, priorRounds = []) {
+  const t = roundTotals(holes);
+  const comparable = comparableRounds(round, t.holesPlayed, priorRounds)
+    .filter((p) => Number.isFinite(p.putts));
+  if (comparable.length < 3) return null;
+
+  const avg = comparable.reduce((s, p) => s + p.putts, 0) / comparable.length;
+  const diff = Math.round((t.putts - avg) * 10) / 10;
+  return {
+    diff,
+    label: diff === 0
+      ? 'Level with your putting average here'
+      : `${Math.abs(diff)} ${diff < 0 ? 'fewer' : 'more'} putts than your average here`,
+    improved: diff < 0,
+  };
 }
 
 function round1(n) {

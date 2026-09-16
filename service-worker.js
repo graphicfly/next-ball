@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v57';
+const CACHE_NAME = 'nextball-v58';
 const PRECACHE_URLS = [
   './',
   './index.html',
