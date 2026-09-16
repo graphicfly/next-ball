@@ -17,7 +17,6 @@
 //   OK:    "Your 9i appeared on several of your higher-scoring holes."
 //   OK:    "Extra shots around the green added strokes today."
 
-import { clubBreakdown } from './stats.js';
 
 // A hole played to regulation is two putts plus (par - 2) full swings, with
 // nothing dropped around the green. That baseline is what the stroke
@@ -317,14 +316,6 @@ const STRETCH_LENGTH = 3;
 // sentence is a claim and needs 3 (§9.5).
 export const MIN_HOLES_FOR_CLUB_SENTENCE = 3;
 
-// One bad range day is not a tendency (§9.5).
-export const MIN_RANGE_SHOTS_FOR_BRIDGE = 30;
-export const MIN_RANGE_SESSIONS_FOR_BRIDGE = 3;
-// A club must be reliable on the range before the bridge mentions it — this
-// is range data, where contact quality genuinely is measured.
-const RELIABLE_RANGE_SOLID_PCT = 60;
-export const MAX_BRIDGE_CLUBS = 2;
-
 // The screen's always-visible answer to "where did the strokes go?" (§9.2).
 //
 // Names only the single largest bucket — never a ranked list — and says so
@@ -425,54 +416,6 @@ export function clubUsage(holes) {
       margin: associations.get(club)?.margin ?? null,
     }))
     .sort((a, b) => b.holeCount - a.holeCount || a.club.localeCompare(b.club));
-}
-
-// Range reliability paired with course appearance (§9.3 §5, §9.7).
-//
-// Returns two independent facts about the same club, never joined by any
-// causal word. Both sides must clear their own threshold: enough range
-// evidence that the club is genuinely reliable there, and enough holes this
-// round for a claim rather than a coincidence.
-export function rangeCourseBridge(holes, rangeSessions, shotsBySession) {
-  const usage = clubUsage(holes).filter((c) => c.holeCount >= MIN_HOLES_FOR_CLUB_SENTENCE);
-  if (!usage.length) return [];
-
-  const shotsByClub = new Map();
-  const sessionsByClub = new Map();
-  for (const session of rangeSessions) {
-    const shots = shotsBySession(session.session_id) || [];
-    const clubsThisSession = new Set();
-    for (const s of shots) {
-      if (!s.club) continue;
-      if (!shotsByClub.has(s.club)) shotsByClub.set(s.club, []);
-      shotsByClub.get(s.club).push(s);
-      clubsThisSession.add(s.club);
-    }
-    for (const club of clubsThisSession) {
-      sessionsByClub.set(club, (sessionsByClub.get(club) || 0) + 1);
-    }
-  }
-
-  const out = [];
-  for (const entry of usage) {
-    const shots = shotsByClub.get(entry.club) || [];
-    const sessionCount = sessionsByClub.get(entry.club) || 0;
-    if (shots.length < MIN_RANGE_SHOTS_FOR_BRIDGE) continue;
-    if (sessionCount < MIN_RANGE_SESSIONS_FOR_BRIDGE) continue;
-
-    const [breakdown] = clubBreakdown(shots);
-    if (!breakdown || breakdown.solidPct < RELIABLE_RANGE_SOLID_PCT) continue;
-
-    out.push({
-      club: entry.club,
-      rangeShots: shots.length,
-      rangeSessions: sessionCount,
-      solidPct: breakdown.solidPct,
-      holeCount: entry.holeCount,
-      avgToPar: entry.avgToPar,
-    });
-  }
-  return out.sort((a, b) => b.solidPct - a.solidPct).slice(0, MAX_BRIDGE_CLUBS);
 }
 
 // Comparable means the SAME course and the SAME number of holes played

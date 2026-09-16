@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { resetDB } from './setup.js';
 import {
   strokeStory, holeStretches, shortGameHoles, puttingSummary, clubUsage,
-  rangeCourseBridge, comparableRounds, scoringComparison, puttingComparison,
+  comparableRounds, scoringComparison, puttingComparison,
   MIN_HOLES_FOR_STRETCH, MIN_HOLES_FOR_CLUB_SENTENCE,
-  MIN_RANGE_SHOTS_FOR_BRIDGE, MIN_RANGE_SESSIONS_FOR_BRIDGE, MAX_BRIDGE_CLUBS,
 } from '../js/roundAnalysis.js';
+import { buildRangeCourseInsights } from '../js/rangeCourseInsights.js';
 
 // Explore Round analytics — docs/course-mode-spec.md §9. Every claim must be
 // traceable to a §6 field, and nothing may appear below its §9.5 threshold.
@@ -167,81 +167,6 @@ describe('Club use (§9.3, §9.7)', () => {
   });
 });
 
-describe('Range → Course bridge (§9.3 §5, §9.5)', () => {
-  function rangeShots(club, count, solidCount) {
-    return Array.from({ length: count }, (_, i) => ({
-      shot_number: i + 1, club,
-      strike: i < solidCount ? 'solid' : 'thin',
-      direction: 'straight', height: 'medium', distance_yards: 140,
-    }));
-  }
-
-  test('pairs range reliability with course appearance when both clear their thresholds', async () => {
-    const holes = makeHoles({
-      strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5],
-      clubs: [['PW'], ['PW'], ['PW'], [], [], [], [], [], []],
-    });
-    const sessions = [{ session_id: 's1' }, { session_id: 's2' }, { session_id: 's3' }];
-    const byId = { s1: rangeShots('PW', 12, 10), s2: rangeShots('PW', 12, 10), s3: rangeShots('PW', 12, 10) };
-
-    const [pair] = rangeCourseBridge(holes, sessions, (id) => byId[id]);
-    assert.equal(pair.club, 'PW');
-    assert.equal(pair.rangeShots, 36);
-    assert.equal(pair.rangeSessions, 3);
-    assert.equal(pair.holeCount, 3);
-    assert.ok(pair.solidPct >= 60);
-  });
-
-  test('too few lifetime range shots keeps the club out', async () => {
-    const holes = makeHoles({ strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5], clubs: [['PW'], ['PW'], ['PW'], [], [], [], [], [], []] });
-    const sessions = [{ session_id: 's1' }, { session_id: 's2' }, { session_id: 's3' }];
-    const byId = { s1: rangeShots('PW', 5, 5), s2: rangeShots('PW', 5, 5), s3: rangeShots('PW', 5, 5) };
-    assert.ok(15 < MIN_RANGE_SHOTS_FOR_BRIDGE);
-    assert.deepEqual(rangeCourseBridge(holes, sessions, (id) => byId[id]), []);
-  });
-
-  test('enough shots but too few sessions keeps the club out — one range day is not a tendency', async () => {
-    const holes = makeHoles({ strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5], clubs: [['PW'], ['PW'], ['PW'], [], [], [], [], [], []] });
-    const sessions = [{ session_id: 's1' }, { session_id: 's2' }];
-    const byId = { s1: rangeShots('PW', 30, 28), s2: rangeShots('PW', 20, 18) };
-    assert.ok(2 < MIN_RANGE_SESSIONS_FOR_BRIDGE);
-    assert.deepEqual(rangeCourseBridge(holes, sessions, (id) => byId[id]), []);
-  });
-
-  test('too few holes this round keeps the club out even with strong range data', async () => {
-    // Two holes — below the 3-hole bar any claim requires.
-    const holes = makeHoles({ strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5], clubs: [['PW'], ['PW'], [], [], [], [], [], [], []] });
-    const sessions = [{ session_id: 's1' }, { session_id: 's2' }, { session_id: 's3' }];
-    const byId = { s1: rangeShots('PW', 15, 14), s2: rangeShots('PW', 15, 14), s3: rangeShots('PW', 15, 14) };
-    assert.deepEqual(rangeCourseBridge(holes, sessions, (id) => byId[id]), []);
-  });
-
-  test('an unreliable range club is not described as reliable', async () => {
-    const holes = makeHoles({ strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5], clubs: [['PW'], ['PW'], ['PW'], [], [], [], [], [], []] });
-    const sessions = [{ session_id: 's1' }, { session_id: 's2' }, { session_id: 's3' }];
-    // 20% solid — real data, but not a reliable club.
-    const byId = { s1: rangeShots('PW', 15, 3), s2: rangeShots('PW', 15, 3), s3: rangeShots('PW', 15, 3) };
-    assert.deepEqual(rangeCourseBridge(holes, sessions, (id) => byId[id]), []);
-  });
-
-  test('at most two clubs — a bridge, not a table', async () => {
-    const holes = makeHoles({
-      strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5],
-      clubs: [['PW', '7i', '9i'], ['PW', '7i', '9i'], ['PW', '7i', '9i'], [], [], [], [], [], []],
-    });
-    const sessions = [{ session_id: 's1' }, { session_id: 's2' }, { session_id: 's3' }];
-    const mixed = (n) => [...rangeShots('PW', n, n), ...rangeShots('7i', n, n), ...rangeShots('9i', n, n)];
-    const byId = { s1: mixed(12), s2: mixed(12), s3: mixed(12) };
-    const pairs = rangeCourseBridge(holes, sessions, (id) => byId[id]);
-    assert.ok(pairs.length <= MAX_BRIDGE_CLUBS);
-  });
-
-  test('no range history at all means the section simply does not exist', async () => {
-    const holes = makeHoles({ strokes: [5, 5, 4, 5, 6, 5, 4, 5, 5], clubs: [['PW'], ['PW'], ['PW'], [], [], [], [], [], []] });
-    assert.deepEqual(rangeCourseBridge(holes, [], () => []), []);
-  });
-});
-
 describe('Comparisons (§9.8)', () => {
   const prior = (over, holesPlayed = 9, course = 'c1', putts = 18) =>
     ({ course_id: course, holesPlayed, toPar: over, putts });
@@ -306,7 +231,7 @@ describe('Low-sample suppression end to end', () => {
     // ...no club clears the narrative bar,
     assert.equal(clubUsage(holes).filter((c) => c.holeCount >= MIN_HOLES_FOR_CLUB_SENTENCE).length, 0);
     // ...and the bridge has no range history to stand on.
-    assert.deepEqual(rangeCourseBridge(holes, [], () => []), []);
+    assert.deepEqual(buildRangeCourseInsights(ROUND, holes, {}), []);
   });
 
   test('test rounds are excluded from comparison entirely', async () => {

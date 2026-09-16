@@ -2,11 +2,11 @@ import * as db from '../db.js';
 import { qs, escapeHtml } from '../ui.js';
 import { exploreSectionHtml, bindExploreAccordion, xsRowHtml, xsSubTitleHtml } from '../summarySections.js';
 import {
-  roundTotals, strokeBreakdown, strokeStory, holeStretches, shortGameHoles,
-  puttingSummary, clubUsage, rangeCourseBridge, scoringComparison, puttingComparison,
-  practiceFocus, formatToPar,
-  MIN_HOLES_FOR_CLUB_SENTENCE, MIN_HOLES_FOR_STRETCH,
+  roundTotals, strokeStory, holeStretches, shortGameHoles,
+  puttingSummary, clubUsage, scoringComparison, puttingComparison,
+  practiceFocus, formatToPar, MIN_HOLES_FOR_CLUB_SENTENCE,
 } from '../roundAnalysis.js';
+import { buildRangeCourseInsights } from '../rangeCourseInsights.js';
 
 // Explore Round — docs/course-mode-spec.md §9.
 //
@@ -42,7 +42,7 @@ export function renderRoundExplore(root, roundId) {
   if (putting) sections.push(putting);
   const clubs = clubUseSection(holes, focus);
   if (clubs) sections.push(clubs);
-  const bridge = bridgeSection(holes);
+  const bridge = bridgeSection(round, holes);
   if (bridge) sections.push(bridge);
 
   root.innerHTML = `
@@ -244,26 +244,29 @@ function clubUseSection(holes, focus) {
   };
 }
 
-// The one section that reaches outside the round. It states two independent
-// facts side by side — range reliability and course appearance — joined by
-// "and", never by "so" or "because" (§9.7). When no club clears both
-// thresholds the whole section is omitted, which is the common case and is
-// correct.
-function bridgeSection(holes) {
+// The one section that reaches outside the round, comparing recent range
+// practice with what the clubs did on the card. Every sentence states two
+// independently recorded facts and never characterises a course shot — the
+// course side records only which clubs appeared on a hole (§7.4, §9.7).
+//
+// When nothing clears its evidence bar the whole section is omitted, which
+// is the common case and is correct.
+function bridgeSection(round, holes) {
   const realSessions = db.listFinishedSessions().filter((s) => db.sessionDataSource(s) === 'real');
-  const pairs = rangeCourseBridge(holes, realSessions, (id) => db.getShotsForSession(id));
-  if (!pairs.length) return null;
+  const insights = buildRangeCourseInsights(round, holes, {
+    rangeSessions: realSessions,
+    shotsBySession: (id) => db.getShotsForSession(id),
+  });
+  if (!insights.length) return null;
 
-  const body = pairs.map((p) => `
-    <div class="xs-note">${escapeHtml(p.club)} has been one of your more reliable range clubs
-    (${p.solidPct}% solid over ${p.rangeShots} shots) and appeared on ${p.holeCount}
-    hole${p.holeCount === 1 ? '' : 's'} this round${p.avgToPar != null ? `, which averaged ${escapeHtml(formatToPar(Math.round(p.avgToPar * 10) / 10))}` : ''}.</div>
+  const body = insights.map((i) => `
+    <div class="xs-note">${escapeHtml(i.text)}</div>
   `).join('');
 
   return {
     icon: 'flow',
     title: 'Range → Course',
-    summary: pairs.map((p) => p.club).join(', '),
+    summary: insights.map((i) => i.club).filter(Boolean).join(', ') || 'Practice and play',
     body,
   };
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v58';
+const CACHE_NAME = 'nextball-v59';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const PRECACHE_URLS = [
   './js/courseProvider.js',
   './js/sessionAnalysis.js',
   './js/roundAnalysis.js',
+  './js/rangeCourseInsights.js',
   './js/sessionStory.js',
   './js/summarySections.js',
   './js/setupPersonalization.js',
