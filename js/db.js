@@ -154,9 +154,14 @@ export function yardsToDistanceLabel(yards) {
 // file, and the JSON backup format, stay exactly the same.
 const INDEX_KEY = 'rangelog_index_v1';
 const shotsKeyFor = (sessionId) => `rangelog_shots_v1_${sessionId}`;
+// Course Mode rounds reuse the identical split (see the Course Mode section
+// below): round metadata in the index, each round's played holes in their
+// own chunk.
+const holesKeyFor = (roundId) => `rangelog_holes_v1_${roundId}`;
 
-let _index = null; // { schemaVersion, sessions: [...], settings: {} }
+let _index = null; // { schemaVersion, sessions: [...], rounds: [...], courses: [...], settings: {} }
 const _shotsCache = new Map(); // session_id -> shots array, lazily loaded from its own key
+const _holesCache = new Map(); // round_id -> holes array, same lazy-load pattern as _shotsCache
 
 function nowISO() {
   return new Date().toISOString();
@@ -200,11 +205,19 @@ function uuid() {
   return 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2);
 }
 
+// schemaVersion is provenance only — nothing in this codebase branches on
+// it. Forward compatibility is handled by normalize-on-load in loadIndex()
+// below (the same way `goals` was added), so an index written by an older
+// version simply gains the missing arrays on its next read and no data is
+// ever rewritten or migrated in place. Bumped 2 -> 3 when Course Mode's
+// rounds/courses arrived.
 function defaultIndex() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     sessions: [],
     goals: [],
+    rounds: [],
+    courses: [],
     settings: { lastClub: null, lastSetup: 'ground', lastSurface: 'mat', lastSwing: 'full', lastBallCount: DEFAULT_BALL_COUNT, lastKnownLocation: null, theme: 'dark' },
   };
 }
@@ -219,6 +232,11 @@ function loadIndex() {
     // same normalize-on-load pattern as `sessions` above, so every caller
     // downstream can assume the array always exists.
     if (!Array.isArray(_index.goals)) _index.goals = [];
+    // Same normalize-on-load treatment for Course Mode's collections — an
+    // index written before Course Mode existed simply has no such keys, and
+    // gains them here rather than through a migration step.
+    if (!Array.isArray(_index.rounds)) _index.rounds = [];
+    if (!Array.isArray(_index.courses)) _index.courses = [];
     if (!_index.settings || typeof _index.settings !== 'object') _index.settings = {};
   } catch (e) {
     console.error('Next Ball: failed to load local data, starting fresh', e);
@@ -269,6 +287,35 @@ function saveShotsChunk(sessionId) {
   }
 }
 
+function loadHolesChunk(roundId) {
+  if (_holesCache.has(roundId)) return _holesCache.get(roundId);
+  let holes = [];
+  try {
+    const raw = localStorage.getItem(holesKeyFor(roundId));
+    holes = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(holes)) holes = [];
+  } catch (e) {
+    console.error('Next Ball: failed to load holes for a round, starting that round empty', e);
+    holes = [];
+  }
+  _holesCache.set(roundId, holes);
+  return holes;
+}
+
+// Unlike saveShotsChunk's callers, upsertHole() propagates this return value
+// to ITS caller: docs/course-mode-spec.md §8 requires a failed write to be
+// surfaced immediately on the hole screen, because silent data loss during a
+// round is the worst failure mode in the feature.
+function saveHolesChunk(roundId) {
+  try {
+    localStorage.setItem(holesKeyFor(roundId), JSON.stringify(_holesCache.get(roundId) || []));
+    return true;
+  } catch (e) {
+    console.error('Next Ball: failed to save holes for a round', e);
+    return false;
+  }
+}
+
 // Test-only seam: loadIndex()/loadShotsChunk() cache in module scope for the
 // process lifetime, so clearing localStorage alone doesn't isolate tests
 // from each other. This forces the next load to re-read from (cleared)
@@ -277,6 +324,7 @@ function saveShotsChunk(sessionId) {
 export function __resetForTests() {
   _index = null;
   _shotsCache.clear();
+  _holesCache.clear();
 }
 
 // Reassembles the old flat {sessions, shots, settings} shape from the index
@@ -287,7 +335,21 @@ export function getDB() {
   const index = loadIndex();
   const shots = [];
   for (const s of index.sessions) shots.push(...loadShotsChunk(s.session_id));
-  return { schemaVersion: index.schemaVersion, sessions: index.sessions, shots, goals: index.goals, settings: index.settings };
+  // Rounds' holes are flattened here exactly like sessions' shots, so a JSON
+  // backup stays one self-describing document rather than one document plus
+  // N opaque chunk keys.
+  const holes = [];
+  for (const r of index.rounds) holes.push(...loadHolesChunk(r.round_id));
+  return {
+    schemaVersion: index.schemaVersion,
+    sessions: index.sessions,
+    shots,
+    goals: index.goals,
+    rounds: index.rounds,
+    courses: index.courses,
+    holes,
+    settings: index.settings,
+  };
 }
 
 // ---------- Sessions ----------
@@ -931,6 +993,463 @@ export function getAllShots() {
   return shots;
 }
 
+// ---------- Course Mode: courses, rounds, holes ----------
+//
+// A round is a SEPARATE entity from a session, never a session variant (see
+// docs/course-mode-spec.md §11.1). createSession() is deeply range-specific
+// — target_ball_count, default_/current_ club/setup/surface/swing, drill,
+// training aid, target distance — and reusing it would leave half those
+// fields permanently null while forcing every range analytic (stats.js,
+// listFinishedSessions(), History, Trends, Groove Score) to branch on type
+// forever. Keeping rounds separate means the range path needs no type guards
+// at all, and Course Mode cannot regress range logging.
+//
+// Storage mirrors the sessions/shots split exactly (§6): round metadata in
+// the index, each round's PLAYED holes in their own
+// rangelog_holes_v1_{roundId} chunk, so a long history of rounds never slows
+// hole entry.
+
+export const COURSE_SOURCES = ['gps_place', 'search', 'remembered', 'manual'];
+export const HOLE_COUNTS = [9, 18];
+export const DEFAULT_HOLE_COUNT = 9;
+export const ROUND_STATUSES = ['active', 'paused', 'finished'];
+
+// A standard 9 (par 35); an 18 is two of these (par 70). This is a starting
+// point the golfer edits on Round Setup (§4.3) — never a claim about the
+// real course, which is why a course's actual pars are remembered only once
+// a round has been played there.
+export const PAR_TEMPLATE_9 = [4, 4, 3, 4, 5, 4, 3, 4, 4];
+
+function normalizeHoleCount(holeCount) {
+  return HOLE_COUNTS.includes(holeCount) ? holeCount : DEFAULT_HOLE_COUNT;
+}
+
+function todayLocalDateString() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function nowLocalTimeString() {
+  return new Date().toTimeString().slice(0, 5);
+}
+
+// Deliberately permissive: any positive integer, or null for unknown. §6
+// documents par as "3-5", which describes what Round Setup's tap-to-cycle
+// control offers — clamping here would silently rewrite a legitimately
+// entered par 6, and §5.4's principle is to record what the golfer said
+// rather than what the app prefers.
+function normalizePar(par, fallback = null) {
+  if (par === null || par === undefined) return fallback;
+  const n = Math.round(Number(par));
+  return Number.isFinite(n) && n >= 1 ? n : fallback;
+}
+
+function normalizeYardage(yardage) {
+  if (yardage === null || yardage === undefined) return null;
+  const n = Math.round(Number(yardage));
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+function clampCount(value, min, fallback) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return n < min ? min : n;
+}
+
+// A hole's club set is unordered, de-duplicated, and carries no counts — it
+// records only WHICH clubs appeared on the hole (§4.4). The putter is
+// excluded because putts are counted in their own field: keeping it would
+// double-record the same strokes and imply the per-shot club tracking the
+// feature explicitly does not do (§6, §7.4).
+function normalizeClubsUsed(clubs) {
+  if (!Array.isArray(clubs)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const c of clubs) {
+    if (typeof c !== 'string') continue;
+    const name = c.trim();
+    if (!name || name.toLowerCase() === 'putter') continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+// One definition per hole for a given course/round — par and, where a source
+// actually provides it, yardage. Yardage is never invented: unknown stays
+// null so display can omit it entirely rather than rendering "— yd" (§8).
+export function defaultHoleDefs(holeCount) {
+  const n = normalizeHoleCount(holeCount);
+  return Array.from({ length: n }, (_, i) => ({
+    hole_number: i + 1,
+    par: PAR_TEMPLATE_9[i % 9],
+    yardage: null,
+  }));
+}
+
+// Always returns exactly holeCount definitions numbered 1..holeCount, with
+// anything the caller supplied merged over the template — so a partial or
+// malformed list (an older round, a provider returning only a few holes)
+// still yields a complete, immediately playable set.
+function normalizeHoleDefs(defs, holeCount) {
+  const base = defaultHoleDefs(holeCount);
+  if (!Array.isArray(defs)) return base;
+  const byNumber = new Map();
+  for (const d of defs) {
+    if (!d || typeof d !== 'object') continue;
+    const num = Math.round(Number(d.hole_number));
+    if (Number.isFinite(num)) byNumber.set(num, d);
+  }
+  return base.map((def) => {
+    const incoming = byNumber.get(def.hole_number);
+    if (!incoming) return def;
+    return {
+      hole_number: def.hole_number,
+      par: normalizePar(incoming.par, def.par),
+      yardage: normalizeYardage(incoming.yardage),
+    };
+  });
+}
+
+// ----- Courses -----
+// A course is the reusable, remembered record behind "Recent Course" and
+// Round Setup's pre-filled pars (§4.2/§4.3). It is deliberately NOT what a
+// round reads for display: a round snapshots its own course fields at
+// creation (see createRound), so editing or deleting a course can never
+// rewrite the history of a round already played there.
+
+export function isProviderBackedCourse(course) {
+  return !!course && course.source !== 'manual' && !!course.place_id;
+}
+
+export function getCourse(courseId) {
+  return loadIndex().courses.find((c) => c.course_id === courseId) || null;
+}
+
+export function findCourseByPlaceId(placeId) {
+  if (!placeId) return null;
+  return loadIndex().courses.find((c) => c.place_id === placeId) || null;
+}
+
+// Most recently played first; never-played courses fall back to creation
+// order, so a course added manually but not yet played is still reachable.
+export function listCourses() {
+  const arr = loadIndex().courses;
+  return arr
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) =>
+      (b.c.last_played_at || '').localeCompare(a.c.last_played_at || '')
+      || (b.c.created_at || '').localeCompare(a.c.created_at || '')
+      || b.i - a.i)
+    .map((x) => x.c);
+}
+
+// §4.2: Select a Course shows exactly ONE recent course, never a list.
+// Courses that have never been played are not "recent" and are excluded.
+export function getRecentCourse() {
+  return listCourses().find((c) => !!c.last_played_at) || null;
+}
+
+// Creates or updates a course. Identity is place_id when the course is
+// provider-backed, otherwise name + city (case-insensitively) — so playing
+// the same manually-typed course twice updates one record rather than
+// accumulating near-duplicates, exactly as rememberVenue() already does for
+// range venues.
+export function upsertCourse(fields = {}) {
+  const index = loadIndex();
+  const name = typeof fields.name === 'string' ? fields.name.trim() : '';
+  if (!name) return null;
+
+  const city = fields.city ? String(fields.city).trim() : null;
+  const state = fields.state ? String(fields.state).trim() : null;
+  const placeId = fields.place_id || null;
+  const source = COURSE_SOURCES.includes(fields.source) ? fields.source : 'manual';
+  const holeCount = normalizeHoleCount(fields.hole_count);
+
+  const existing = placeId
+    ? index.courses.find((c) => c.place_id === placeId)
+    : index.courses.find((c) =>
+      !c.place_id
+      && c.name.toLowerCase() === name.toLowerCase()
+      && (c.city || '').toLowerCase() === (city || '').toLowerCase());
+
+  const ts = nowISO();
+  if (existing) {
+    existing.name = name;
+    if (city !== null) existing.city = city;
+    if (state !== null) existing.state = state;
+    if (fields.latitude != null) existing.latitude = fields.latitude;
+    if (fields.longitude != null) existing.longitude = fields.longitude;
+    if (placeId) existing.place_id = placeId;
+    if (fields.hole_count !== undefined) existing.hole_count = holeCount;
+    if (fields.hole_defs !== undefined) existing.hole_defs = normalizeHoleDefs(fields.hole_defs, existing.hole_count);
+    existing.updated_at = ts;
+    saveIndex();
+    return existing;
+  }
+
+  const course = {
+    course_id: uuid(),
+    name,
+    city,
+    state,
+    latitude: fields.latitude ?? null,
+    longitude: fields.longitude ?? null,
+    // OSM "type/id" when a provider supplied this course; null for manual.
+    place_id: placeId,
+    source,
+    // Which external system place_id belongs to — null for a manually typed
+    // course. Stored rather than inferred so a second provider could be
+    // added later without re-interpreting existing records.
+    provider: fields.provider ?? (placeId ? 'osm' : null),
+    hole_count: holeCount,
+    // Remembered after the first round here (§4.3) so a returning golfer's
+    // Round Setup is pre-filled correctly.
+    hole_defs: normalizeHoleDefs(fields.hole_defs, holeCount),
+    last_played_at: null,
+    play_count: 0,
+    created_at: ts,
+    updated_at: ts,
+  };
+  index.courses.push(course);
+  saveIndex();
+  return course;
+}
+
+// Records that a round was played at this course, remembering the hole
+// count and pars that round actually used (§4.3). Called when a round is
+// created, so the next round at the same course starts pre-filled.
+export function recordCoursePlayed(courseId, { hole_count, hole_defs } = {}) {
+  const course = getCourse(courseId);
+  if (!course) return null;
+  if (hole_count !== undefined) course.hole_count = normalizeHoleCount(hole_count);
+  if (hole_defs !== undefined) course.hole_defs = normalizeHoleDefs(hole_defs, course.hole_count);
+  course.play_count = (course.play_count || 0) + 1;
+  course.last_played_at = nowISO();
+  course.updated_at = nowISO();
+  saveIndex();
+  return course;
+}
+
+// ----- Rounds -----
+
+export function createRound(fields = {}) {
+  const index = loadIndex();
+  const ts = nowISO();
+  const holeCount = normalizeHoleCount(fields.hole_count);
+  const round = {
+    round_id: uuid(),
+    // Optional link to the reusable course record. Display NEVER reads
+    // through this — see the snapshot fields below — it exists only for
+    // "have I played here before" comparisons (§4.5).
+    course_id: fields.course_id ?? null,
+    // Course snapshot (§6). Denormalized on purpose: a finished round must
+    // stay fully readable even if its course record is later edited,
+    // renamed, or removed — the same reason a shot snapshots its own club
+    // and setup rather than reading the session's current values.
+    course_name: typeof fields.course_name === 'string' ? fields.course_name.trim() : '',
+    course_city: fields.course_city ?? null,
+    course_state: fields.course_state ?? null,
+    course_place_id: fields.course_place_id ?? null,
+    course_source: COURSE_SOURCES.includes(fields.course_source) ? fields.course_source : 'manual',
+    latitude: fields.latitude ?? null,
+    longitude: fields.longitude ?? null,
+    hole_count: holeCount,
+    // Per-hole par/yardage for THIS round, snapshotted from the course (or
+    // the template) at setup and editable for this round alone. Par must be
+    // known before a hole is played, since the score stepper opens at par
+    // (§4.4) — that is why it lives here rather than only on played holes.
+    hole_defs: normalizeHoleDefs(fields.hole_defs, holeCount),
+    date: fields.date || todayLocalDateString(),
+    start_time: fields.start_time || nowLocalTimeString(),
+    end_time: null,
+    status: 'active',
+    // Full-precision finish timestamp. end_time above matches the session
+    // convention (local HH:MM) but loses the date, which is ambiguous for a
+    // round that ends after midnight; both are kept rather than changing the
+    // established session convention.
+    completed_at: null,
+    data_source: fields.data_source === 'test' ? 'test' : 'real',
+    created_at: ts,
+    updated_at: ts,
+  };
+  index.rounds.push(round);
+  saveIndex();
+  return round;
+}
+
+export function updateRound(roundId, patch) {
+  const index = loadIndex();
+  const r = index.rounds.find((r) => r.round_id === roundId);
+  if (!r) return null;
+  Object.assign(r, patch, { updated_at: nowISO() });
+  saveIndex();
+  return r;
+}
+
+export function getRound(roundId) {
+  return loadIndex().rounds.find((r) => r.round_id === roundId) || null;
+}
+
+// Mirrors getActiveSession(). The "only one activity at a time" rule (§4.1)
+// is a UI policy enforced on Home, not here — the data layer only answers
+// what is currently in progress.
+export function getActiveRound() {
+  return loadIndex().rounds.find((r) => r.status === 'active' || r.status === 'paused') || null;
+}
+
+export function listRounds() {
+  const arr = loadIndex().rounds;
+  return arr
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (b.r.created_at || '').localeCompare(a.r.created_at || '') || b.i - a.i)
+    .map((x) => x.r);
+}
+
+export function listFinishedRounds() {
+  return listRounds().filter((r) => r.status === 'finished');
+}
+
+export function pauseRound(roundId) {
+  return updateRound(roundId, { status: 'paused' });
+}
+
+export function resumeRound(roundId) {
+  return updateRound(roundId, { status: 'active' });
+}
+
+// Ends a round, recording only the holes actually played — unplayed holes
+// were never written and are never backfilled as 0 (§5.6).
+//
+// A round finished with zero holes should be DISCARDED rather than kept as
+// an empty record (§8); that is a UI decision made once, at the single place
+// a round is ended, and deliberately not enforced here — the same division
+// of responsibility as finishSession()/deleteSession().
+export function finishRound(roundId) {
+  return updateRound(roundId, {
+    status: 'finished',
+    end_time: nowLocalTimeString(),
+    completed_at: nowISO(),
+  });
+}
+
+// Same contract and the same index-first ordering as deleteSession(): the
+// worst possible partial failure is an orphaned holes chunk, which nothing
+// ever reads because every read reaches a round's holes by walking the
+// index.
+export function deleteRound(roundId) {
+  const index = loadIndex();
+  const idx = index.rounds.findIndex((r) => r.round_id === roundId);
+  if (idx === -1) return null;
+
+  const removedRound = index.rounds[idx];
+  if (removedRound.status === 'active' || removedRound.status === 'paused') {
+    throw Object.assign(new Error('Cannot delete an in-progress round'), { code: 'active_round' });
+  }
+
+  const holes = getHolesForRound(roundId);
+  index.rounds.splice(idx, 1);
+  if (!saveIndex()) {
+    index.rounds.splice(idx, 0, removedRound);
+    throw Object.assign(new Error('Failed to delete round'), { code: 'storage_error' });
+  }
+
+  try {
+    localStorage.removeItem(holesKeyFor(roundId));
+  } catch (e) {
+    console.error('Next Ball: round deleted, but failed to clean up its hole data (harmless orphaned key)', e);
+  }
+  _holesCache.delete(roundId);
+
+  return { round: removedRound, holes };
+}
+
+// ----- Holes -----
+
+export function getHolesForRound(roundId) {
+  return [...loadHolesChunk(roundId)].sort((a, b) => a.hole_number - b.hole_number);
+}
+
+export function getHole(roundId, holeNumber) {
+  return loadHolesChunk(roundId).find((h) => h.hole_number === holeNumber) || null;
+}
+
+// How many holes were actually played — derived from the stored holes, never
+// a denormalized counter that could drift out of step with them (§5.6, §8).
+export function roundHolesPlayed(roundId) {
+  return loadHolesChunk(roundId).length;
+}
+
+// Creates or updates one hole and persists immediately, so a round survives
+// a backgrounded app, a dead battery, or a mid-round phone call with every
+// completed hole intact (§4.4, §5.3).
+//
+// Returns { hole, saved }. `saved` is the actual storage write result, which
+// the caller MUST surface rather than ignore — §8 names silent data loss
+// during a round the worst failure mode in this feature.
+//
+// Cross-field validation is deliberately absent: short_game_strokes + putts
+// may legitimately exceed strokes and is stored exactly as entered (§5.4).
+// Advising the golfer about that is the hole screen's job, not storage's.
+export function upsertHole(roundId, holeNumber, patch = {}) {
+  const round = getRound(roundId);
+  if (!round) return { hole: null, saved: false };
+
+  const num = Math.round(Number(holeNumber));
+  if (!Number.isFinite(num) || num < 1 || num > round.hole_count) return { hole: null, saved: false };
+
+  const holes = loadHolesChunk(roundId);
+  const existing = holes.find((h) => h.hole_number === num) || null;
+  const def = round.hole_defs.find((d) => d.hole_number === num) || null;
+  const ts = nowISO();
+
+  // A played hole distinguishes "not supplied" (keep/inherit) from an
+  // explicit null, which per §6 is a real value meaning the par is unknown.
+  // normalizeHoleDefs deliberately resolves the same input differently: a
+  // definition must always yield a playable par for the score stepper to
+  // open on (§4.4), so there a missing par falls back to the template.
+  const patchedPar = (value, fallback) => (value === null ? null : normalizePar(value, fallback));
+
+  let hole;
+  if (existing) {
+    hole = existing;
+    if (patch.par !== undefined) hole.par = patchedPar(patch.par, hole.par);
+    if (patch.yardage !== undefined) hole.yardage = normalizeYardage(patch.yardage);
+    if (patch.strokes !== undefined) hole.strokes = clampCount(patch.strokes, 1, hole.strokes);
+    if (patch.clubs_used !== undefined) hole.clubs_used = normalizeClubsUsed(patch.clubs_used);
+    if (patch.short_game_strokes !== undefined) hole.short_game_strokes = clampCount(patch.short_game_strokes, 0, hole.short_game_strokes);
+    if (patch.putts !== undefined) hole.putts = clampCount(patch.putts, 0, hole.putts);
+    hole.updated_at = ts;
+  } else {
+    // Par and yardage default from this round's own hole definitions, so a
+    // played hole carries its own copy and stays truthful even if the
+    // round's definitions are edited afterwards.
+    const par = patch.par !== undefined ? patchedPar(patch.par, def?.par ?? null) : (def?.par ?? null);
+    hole = {
+      round_id: roundId,
+      hole_number: num,
+      par,
+      yardage: patch.yardage !== undefined ? normalizeYardage(patch.yardage) : (def?.yardage ?? null),
+      // A hole record only exists once it has been played, and strokes is
+      // required (§6) — a write that omits it starts at par, the same value
+      // the score stepper opens on (§4.4).
+      strokes: clampCount(patch.strokes, 1, par ?? 1),
+      clubs_used: normalizeClubsUsed(patch.clubs_used),
+      short_game_strokes: clampCount(patch.short_game_strokes, 0, 0),
+      putts: clampCount(patch.putts, 0, 0),
+      created_at: ts,
+      updated_at: ts,
+    };
+    holes.push(hole);
+  }
+
+  const saved = saveHolesChunk(roundId);
+  return { hole, saved };
+}
+
 // ---------- Settings ----------
 
 export function getSettings() {
@@ -962,6 +1481,16 @@ export function importFullDB(obj) {
       try { localStorage.removeItem(shotsKeyFor(s.session_id)); } catch (e) { /* best-effort cleanup */ }
     }
   }
+  // Identical cleanup for rounds' hole chunks. A pre-Course-Mode backup has
+  // no `rounds` key at all, so restoring one correctly removes every round
+  // and its holes — the same way it already removes sessions absent from the
+  // file, and the same path Settings' "Erase All Data" takes.
+  const incomingRoundIds = new Set(Array.isArray(obj.rounds) ? obj.rounds.map((r) => r.round_id) : []);
+  for (const r of loadIndex().rounds) {
+    if (!incomingRoundIds.has(r.round_id)) {
+      try { localStorage.removeItem(holesKeyFor(r.round_id)); } catch (e) { /* best-effort cleanup */ }
+    }
+  }
 
   _index = {
     schemaVersion: obj.schemaVersion || 1,
@@ -969,6 +1498,9 @@ export function importFullDB(obj) {
     // Older backups (pre-goal-persistence) simply have no `goals` key —
     // that's not a corrupt file, just data from before this existed.
     goals: Array.isArray(obj.goals) ? obj.goals : [],
+    // Same for pre-Course-Mode backups and their rounds/courses.
+    rounds: Array.isArray(obj.rounds) ? obj.rounds : [],
+    courses: Array.isArray(obj.courses) ? obj.courses : [],
     // Merged (not `obj.settings || defaultIndex().settings`) so an empty or
     // partial settings object — e.g. Settings' "Erase All Data" passing
     // `{}` deliberately — still ends up with every default field rather
@@ -977,6 +1509,7 @@ export function importFullDB(obj) {
     settings: { ...defaultIndex().settings, ...(obj.settings && typeof obj.settings === 'object' ? obj.settings : {}) },
   };
   _shotsCache.clear();
+  _holesCache.clear();
   saveIndex();
 
   const shotsBySession = new Map();
@@ -988,6 +1521,17 @@ export function importFullDB(obj) {
   for (const s of obj.sessions) {
     _shotsCache.set(s.session_id, shotsBySession.get(s.session_id) || []);
     saveShotsChunk(s.session_id);
+  }
+
+  const holesByRound = new Map();
+  for (const h of (Array.isArray(obj.holes) ? obj.holes : [])) {
+    let list = holesByRound.get(h.round_id);
+    if (!list) { list = []; holesByRound.set(h.round_id, list); }
+    list.push(h);
+  }
+  for (const r of _index.rounds) {
+    _holesCache.set(r.round_id, holesByRound.get(r.round_id) || []);
+    saveHolesChunk(r.round_id);
   }
 
   return getDB();
