@@ -195,11 +195,26 @@ a { color: inherit; }
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
+/* The app shell (#app) carries the 16px side gutter, so a full-bleed child —
+   the Home, Setup and Recap heroes — escapes it with negative side margins
+   and a width of calc(100% + 32px). That lands the hero exactly on the
+   viewport edges, which is right, but 16px past THIS box's right edge,
+   which is enough to make a vertical scroller scroll sideways too: with
+   overflow-y auto, an unset overflow-x computes to auto rather than
+   visible, so both scrollbars appeared.
+   Stretching this box out to the viewport and re-applying the gutter as
+   padding leaves every ordinary child exactly where it was, while giving
+   the full-bleed ones a padding box they fit inside precisely. overflow-x
+   is then pinned to hidden so no future full-bleed element can re-arm the
+   horizontal bar. */
 .scroll {
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   flex: 1;
   min-height: 0;
+  margin-inline: calc(-1 * var(--space-4));
+  padding-inline: var(--space-4);
 }
 
 h1, h2, h3, p { margin: 0; }
@@ -541,9 +556,30 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 
 .home-screen { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
+/* Home is a landing screen and should not scroll: hero, two choice cards,
+   and the setup line all have to fit. They do on a tall viewport, but a real
+   mobile Safari tab with its toolbars showing is ~190px shorter, and the
+   hero's 40vh was rigid in a block-layout column — so the screen scrolled
+   vertically and the bottom of the page sat under the nav.
+   Making this a flex column lets the hero absorb the difference. It gives up
+   height only when there isn't enough, keeps its 40vh ceiling on a tall
+   screen, and never drops below a height that still reads as a photo. */
+.home-scroll { display: flex; flex-direction: column; }
+/* The cards, labels and setup line keep their designed heights; the hero is
+   the only thing allowed to give, so a short viewport crops the photo
+   instead of squeezing every control on the screen. */
+.home-scroll > * { flex-shrink: 0; }
+
 .home-hero-bg {
   position: relative;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  /* The floor is what the hero may shrink to on the shortest viewport this
+     screen has to fit: the smallest current iPhone with both Safari
+     toolbars showing, about 375x635. Set it higher and Home starts
+     scrolling again by two or three pixels, which is the worst outcome — a
+     scrollbar that buys nothing. The 40vh ceiling is untouched, so nothing
+     changes on a normal-height screen. */
+  min-height: 100px;
   margin: calc(-1 * (var(--safe-top) + var(--space-4))) calc(-1 * var(--space-4)) 0;
   width: calc(100% + var(--space-4) * 2);
   aspect-ratio: 1080 / 1350;
@@ -825,7 +861,7 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 
 /* Results inside a sheet scroll on their own rather than growing the sheet
    past the viewport. */
-.course-result-list { max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.course-result-list { max-height: 46vh; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 .course-result-list .course-row { margin-bottom: var(--space-2); }
 
 .manual-city-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: var(--space-2); }
@@ -1577,6 +1613,10 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
      completely unreachable rather than just visually tight — this lets a
      real device recover by scrolling instead of losing the controls. */
   overflow-y: auto;
+  /* Vertical scroller: pin overflow-x, because an unset one computes to
+     auto next to overflow-y:auto and shows a horizontal bar on any
+     sub-pixel or full-bleed overhang. */
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -2595,6 +2635,10 @@ textarea { min-height: 76px; resize: vertical; }
   margin: 0 auto;
   max-height: 85vh;
   overflow-y: auto;
+  /* Vertical scroller: pin overflow-x, because an unset one computes to
+     auto next to overflow-y:auto and shows a horizontal bar on any
+     sub-pixel or full-bleed overhang. */
+  overflow-x: hidden;
   animation: sheet-in var(--duration-slow) var(--ease-standard);
 }
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0.5; } to { transform: translateY(0); opacity: 1; } }
@@ -2979,6 +3023,10 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* Vertical scroller: pin overflow-x, because an unset one computes to
+     auto next to overflow-y:auto and shows a horizontal bar on any
+     sub-pixel or full-bleed overhang. */
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
 .setup-back-btn {
