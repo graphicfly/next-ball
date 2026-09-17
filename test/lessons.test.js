@@ -424,3 +424,59 @@ describe('Active Focus and Next Goal coexist — §3.1, §8', () => {
     assert.equal(db.getActiveGoal().status, 'active');
   });
 });
+
+// Records this app did not write itself — a hand-edited backup, a partial
+// file, a file from an older build. db.js repairs their shape on the way in
+// so that every reader can rely on it, and never invents content.
+describe('A lesson from a damaged backup is repaired, not trusted', () => {
+  test('a lesson with no cues array loads with an empty one instead of undefined', async () => {
+    const db = await resetDB();
+    db.importFullDB({
+      schemaVersion: 5, sessions: [], shots: [], settings: {},
+      lessons: [{ lesson_id: 'x', date: '2026-09-13', instructor_name: 'Gaza' }],
+    });
+    const l = db.getLesson('x');
+    // History's renderer reads cues[0] and cues.length unguarded; undefined
+    // here threw and took down the app's main list screen.
+    assert.deepEqual(l.cues, []);
+    assert.deepEqual(l.drills, []);
+    assert.deepEqual(l.topics, []);
+    assert.deepEqual(l.video_ids, []);
+    assert.equal(l.notes, '');
+  });
+
+  test('repair does not invent content, and the record stays editable', async () => {
+    const db = await resetDB();
+    db.importFullDB({
+      schemaVersion: 5, sessions: [], shots: [], settings: {},
+      lessons: [{ lesson_id: 'x', date: '2026-09-13' }],
+    });
+    assert.equal(db.getLesson('x').cues.length, 0);
+    const fixed = db.updateLesson('x', { cues: ['Stay over it'] });
+    assert.deepEqual(fixed.cues, [{ order: 1, text: 'Stay over it' }]);
+  });
+
+  test('malformed cue entries are dropped rather than kept as junk', async () => {
+    const db = await resetDB();
+    db.importFullDB({
+      schemaVersion: 5, sessions: [], shots: [], settings: {},
+      lessons: [{ lesson_id: 'x', date: '2026-09-13', cues: 'not an array' }],
+    });
+    assert.deepEqual(db.getLesson('x').cues, []);
+  });
+
+  // The repair used to run only in loadIndex(), which an import never passes
+  // back through — so a restored backup stayed broken until the next reload.
+  test('the repair applies at import time, not just on the next reload', async () => {
+    const db = await resetDB();
+    db.importFullDB({
+      schemaVersion: 5, sessions: [], shots: [], settings: {},
+      lessons: [{ lesson_id: 'x', date: '2026-09-13' }],
+      practice_plans: [{ plan_id: 'p', round_id: 'r', status: 'saved', created_at: '2026-01-01' }],
+    });
+    // No reload between the import and these reads.
+    assert.deepEqual(db.getLesson('x').cues, []);
+    assert.equal(db.getPlan('p').source, 'round');
+    assert.equal(db.getPlan('p').lesson_id, null);
+  });
+});

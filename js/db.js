@@ -229,36 +229,61 @@ function defaultIndex() {
   };
 }
 
+// Brings a raw index up to the shape every reader assumes, without
+// rewriting storage — the normalize-on-load idiom this file has used since
+// `goals` arrived. An index written by an older build, or restored from a
+// backup made by one, simply gains the missing pieces on its next read.
+//
+// Shared by loadIndex() and importFullDB(): an import replaces `_index`
+// wholesale and never passes back through the loader, so anything only done
+// there would sit unapplied until the next reload.
+function normalizeIndexShape(idx) {
+  if (!Array.isArray(idx.sessions)) idx.sessions = [];
+  // Older saved indexes (pre-goal-persistence) simply lack this key —
+  // same normalize-on-load pattern as `sessions` above, so every caller
+  // downstream can assume the array always exists.
+  if (!Array.isArray(idx.goals)) idx.goals = [];
+  // Same normalize-on-load treatment for Course Mode's collections — an
+  // index written before Course Mode existed simply has no such keys, and
+  // gains them here rather than through a migration step.
+  if (!Array.isArray(idx.rounds)) idx.rounds = [];
+  if (!Array.isArray(idx.courses)) idx.courses = [];
+  if (!Array.isArray(idx.practice_plans)) idx.practice_plans = [];
+  // Plans written before lessons existed have no `source` — every one of
+  // them came from a round, which is exactly what the absent field means.
+  for (const p of idx.practice_plans) {
+    if (!p.source) p.source = 'round';
+    if (p.lesson_id === undefined) p.lesson_id = null;
+    if (p.round_id === undefined) p.round_id = null;
+  }
+  // Lessons arrive the same way every other collection did — an index
+  // written before V4.2 simply gains the key on its next read.
+  if (!Array.isArray(idx.lessons)) idx.lessons = [];
+  // Every lesson this app writes has cues, drills, topics and video_ids,
+  // because createLesson refuses anything less. A lesson that arrived
+  // through importFullDB has whatever the file contained — and a record
+  // missing `cues` threw inside History's renderer, taking down the app's
+  // main list screen and with it the only route to the offending lesson.
+  // Repaired here rather than guarded at each call site, so every reader
+  // can rely on the shape. Nothing is invented: a lesson with no usable
+  // cues gets an empty list and stays editable.
+  for (const l of idx.lessons) {
+    if (!Array.isArray(l.cues)) l.cues = normalizeLessonCues(l.cues);
+    if (!Array.isArray(l.drills)) l.drills = normalizeLessonDrills(l.drills);
+    if (!Array.isArray(l.topics)) l.topics = [];
+    if (!Array.isArray(l.video_ids)) l.video_ids = [];
+    if (typeof l.notes !== 'string') l.notes = '';
+  }
+  if (!idx.settings || typeof idx.settings !== 'object') idx.settings = {};
+  if (idx.settings.active_swing_focus === undefined) idx.settings.active_swing_focus = null;
+  return idx;
+}
+
 function loadIndex() {
   if (_index) return _index;
   try {
     const raw = localStorage.getItem(INDEX_KEY);
-    _index = raw ? JSON.parse(raw) : defaultIndex();
-    if (!Array.isArray(_index.sessions)) _index.sessions = [];
-    // Older saved indexes (pre-goal-persistence) simply lack this key —
-    // same normalize-on-load pattern as `sessions` above, so every caller
-    // downstream can assume the array always exists.
-    if (!Array.isArray(_index.goals)) _index.goals = [];
-    // Same normalize-on-load treatment for Course Mode's collections — an
-    // index written before Course Mode existed simply has no such keys, and
-    // gains them here rather than through a migration step.
-    if (!Array.isArray(_index.rounds)) _index.rounds = [];
-    if (!Array.isArray(_index.courses)) _index.courses = [];
-    if (!Array.isArray(_index.practice_plans)) _index.practice_plans = [];
-    // Plans written before lessons existed have no `source` — every one of
-    // them came from a round, which is exactly what the absent field means.
-    // Normalized on load rather than migrated in place, like everything
-    // else here, so a backup restored tomorrow gets the same treatment.
-    for (const p of _index.practice_plans) {
-      if (!p.source) p.source = 'round';
-      if (p.lesson_id === undefined) p.lesson_id = null;
-      if (p.round_id === undefined) p.round_id = null;
-    }
-    // Lessons arrive the same way every other collection did — an index
-    // written before V4.2 simply gains the key on its next read.
-    if (!Array.isArray(_index.lessons)) _index.lessons = [];
-    if (!_index.settings || typeof _index.settings !== 'object') _index.settings = {};
-    if (_index.settings.active_swing_focus === undefined) _index.settings.active_swing_focus = null;
+    _index = normalizeIndexShape(raw ? JSON.parse(raw) : defaultIndex());
   } catch (e) {
     console.error('Next Ball: failed to load local data, starting fresh', e);
     _index = defaultIndex();
@@ -2362,6 +2387,9 @@ export function importFullDB(obj) {
     // assumes exists via its own `||` fallback.
     settings: { ...defaultIndex().settings, ...(obj.settings && typeof obj.settings === 'object' ? obj.settings : {}) },
   };
+  // A backup is the one source of records this app did not write itself, so
+  // it gets exactly the same repair a stored index gets on load.
+  normalizeIndexShape(_index);
   _shotsCache.clear();
   _holesCache.clear();
   saveIndex();

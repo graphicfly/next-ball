@@ -3,7 +3,7 @@ import { qs, qsa, fmtDate, cap, metricRowHtml, statusBadgeHtml, emptyStateHtml, 
 import { sessionSummary, clubSummaryLabel } from '../stats.js';
 import { roundTotals, formatToPar } from '../roundAnalysis.js';
 import { downloadSessionCSV } from '../export.js';
-import { takePendingLessonUndo } from './lessonSummary.js';
+import { takePendingLessonUndo, openLessonDeleteConfirmSheet } from './lessonSummary.js';
 
 const ICON_DOTS = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
 
@@ -106,7 +106,10 @@ function roundCardHtml(round) {
 // are trying to remember.
 function lessonCardHtml(lesson, activeFocus) {
   const isFocus = activeFocus && activeFocus.lesson_id === lesson.lesson_id;
-  const primary = lesson.cues[0]?.text || '';
+  // A lesson restored from a damaged backup can arrive with no cues (db.js
+  // repairs the shape but never invents content), so the headline falls
+  // back rather than rendering an empty line.
+  const primary = lesson.cues[0]?.text || 'Lesson';
   const extra = lesson.cues.length - 1;
   return `
     <div class="session-card lesson-card" data-lesson-id="${lesson.lesson_id}">
@@ -168,12 +171,21 @@ export function renderHistory(root) {
     // belongs on the day it happened, not at the top of the list.
   ].sort((a, b) => b.on.localeCompare(a.on) || b.at.localeCompare(a.at));
 
+  const kinds = new Set(all.map((e) => e.kind));
+  // A filter outlives the thing it was filtering for. Delete the last range
+  // session while Range is selected and the chip row disappears — it only
+  // renders for two kinds or more — leaving the filter set, every remaining
+  // entry hidden, and no control on screen to undo it. History is the only
+  // route to a lesson, so that stranded a golfer's lessons until a full app
+  // restart. A filter with nothing left to match is meaningless, so it
+  // stands down.
+  if (activeFilter !== 'all' && !kinds.has(activeFilter)) activeFilter = 'all';
+
   const entries = activeFilter === 'all' ? all : all.filter((e) => e.kind === activeFilter);
 
   // The chip row is shown once there is more than one kind of thing to
   // separate. With only range sessions logged it would be a control that
   // does nothing, which §1.4 rules out.
-  const kinds = new Set(all.map((e) => e.kind));
   const filtersHtml = kinds.size > 1 ? `
     <div class="history-filters" role="group" aria-label="Filter history">
       ${FILTERS.map((f) => `<button class="filter-chip ${activeFilter === f.id ? 'selected' : ''}" data-filter="${f.id}" aria-pressed="${activeFilter === f.id}">${f.label}</button>`).join('')}
@@ -237,7 +249,8 @@ export function renderHistory(root) {
   qsa('.lesson-menu-btn', root).forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      location.hash = `#/lesson/${btn.dataset.menuId}`;
+      const lesson = db.getLesson(btn.dataset.menuId);
+      if (lesson) openLessonMenuSheet(lesson, root);
     });
   });
 
@@ -505,5 +518,65 @@ function openRoundDeleteConfirmSheet(round, root) {
       if (location.hash === '#/history') renderHistory(root);
     }, 5000);
     renderHistory(root);
+  });
+}
+
+// The lesson counterpart to openSessionMenuSheet and openRoundMenuSheet.
+// The `•••` used to navigate to the Lesson Summary — the same thing tapping
+// the row already did — which made the affordance a lie and left lessons as
+// the one entity in History with no delete path.
+//
+// Three actions, matching the round menu's shape: open it, edit it, delete
+// it. Editing is offered here because a lesson is the one record in the app
+// whose text the golfer is expected to correct (§2.3), so it earns a place
+// one tap from the list.
+function openLessonMenuSheet(lesson, root) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="lessonRowMenuTitle">
+      <h2 id="lessonRowMenuTitle">${fmtDate(lesson.date)}</h2>
+      ${lesson.instructor_name ? `<p class="tiny muted" style="margin-bottom:var(--space-3);">with ${escapeHtml(lesson.instructor_name)}</p>` : ''}
+      <div class="stack">
+        <button class="btn" id="lessonRowViewBtn">View Lesson</button>
+        <button class="btn" id="lessonRowEditBtn">Edit Lesson</button>
+        <button class="btn btn-danger" id="lessonRowDeleteBtn" aria-label="Delete this lesson permanently">Delete Lesson</button>
+        <button class="btn btn-outline" id="lessonRowCancelBtn">Cancel</button>
+      </div>
+    </div>
+  `;
+  if (!presentSheet(backdrop)) return;
+  const untrap = trapSheetFocus(backdrop, close);
+  qs('#lessonRowCancelBtn', backdrop).focus();
+
+  function close() {
+    untrap();
+    backdrop.remove();
+  }
+
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  qs('#lessonRowCancelBtn', backdrop).addEventListener('click', close);
+  qs('#lessonRowViewBtn', backdrop).addEventListener('click', () => {
+    close();
+    location.hash = `#/lesson/${lesson.lesson_id}`;
+  });
+  qs('#lessonRowEditBtn', backdrop).addEventListener('click', () => {
+    close();
+    location.hash = `#/lesson/edit/${lesson.lesson_id}`;
+  });
+  qs('#lessonRowDeleteBtn', backdrop).addEventListener('click', () => {
+    close();
+    // The shared confirmation from lessonSummary.js, so both delete paths
+    // name the same consequences — including that past range sessions keep
+    // the cue they were practised under (§5.2).
+    openLessonDeleteConfirmSheet(lesson, (result) => {
+      clearPendingUndo();
+      pendingUndo = { kind: 'lesson', lesson: result.lesson, plans: result.plans, focus: result.focus };
+      pendingUndoTimer = setTimeout(() => {
+        pendingUndo = null;
+        if (location.hash === '#/history') renderHistory(root);
+      }, 5000);
+      renderHistory(root);
+    });
   });
 }

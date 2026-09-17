@@ -36,6 +36,7 @@ export function renderLessonSummary(root, lessonId) {
 
         <div class="section-eyebrow">Cues</div>
         <div class="lesson-cues">
+          ${!lesson.cues.length ? '<p class="tiny muted">This lesson has no cues. Tap Edit to add one.</p>' : ''}
           ${lesson.cues.map((cue) => `
             <div class="lesson-cue ${focusHere === cue.order ? 'is-focus' : ''}">
               <div class="lesson-cue-text">${escapeHtml(cue.text)}</div>
@@ -58,7 +59,7 @@ export function renderLessonSummary(root, lessonId) {
 
       <div class="hole-actions">
         <button class="btn btn-outline" id="editLessonBtn">Edit</button>
-        <button class="btn btn-primary" id="planBtn">Practice This</button>
+        ${lesson.cues.length ? '<button class="btn btn-primary" id="planBtn">Practice This</button>' : ''}
       </div>
     </div>
   `;
@@ -74,7 +75,7 @@ export function renderLessonSummary(root, lessonId) {
     });
   });
 
-  qs('#planBtn', root).addEventListener('click', () => {
+  qs('#planBtn', root)?.addEventListener('click', () => {
     // Setting the focus is the point of the action; the plan screen is
     // where the optional structure is built (§4.5). Doing both from one tap
     // keeps the common path — "this is what I'm working on now" — to a
@@ -126,11 +127,20 @@ function openLessonMenuSheet(lesson, root) {
   });
   qs('#lessonMenuDeleteBtn', backdrop).addEventListener('click', () => {
     close();
-    openLessonDeleteConfirmSheet(lesson);
+    openLessonDeleteConfirmSheet(lesson, (result) => {
+      // Back to History, which owns lessons (§5A) and holds the single Undo
+      // slot for every kind of delete.
+      setPendingLessonUndo(result);
+      location.hash = '#/history';
+    });
   });
 }
 
-function openLessonDeleteConfirmSheet(lesson) {
+// Shared by Lesson Summary (returns to History, which holds the Undo) and
+// by History's own row menu (stays put, shows Undo immediately) — the same
+// arrangement openDeleteConfirmSheet has for sessions. `onDeleted` is called
+// only after a confirmed, successful deletion, with what was removed.
+export function openLessonDeleteConfirmSheet(lesson, onDeleted) {
   const plan = db.getPlanForLesson(lesson.lesson_id);
   const isFocus = db.getActiveSwingFocus()?.lesson_id === lesson.lesson_id;
 
@@ -179,10 +189,7 @@ function openLessonDeleteConfirmSheet(lesson) {
     }
     close();
     if (!result) { toast('Unable to delete lesson. Please try again.'); return; }
-    // Back to History, which owns lessons (§5A) and holds the Undo window
-    // for every kind of delete.
-    setPendingLessonUndo(result);
-    location.hash = '#/history';
+    onDeleted(result);
   });
 }
 
