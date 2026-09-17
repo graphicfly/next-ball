@@ -112,8 +112,16 @@ export function clearPendingPlan() {
 // seed a new one, so the round id is checked on the way out.
 let holeEntryState = null;
 
-export function setHoleEntryState(roundId, holeNumber, draft) {
-  holeEntryState = { roundId, holeNumber, draft: { ...draft, clubs_used: [...(draft?.clubs_used || [])] } };
+// `draft` is optional. The Hole Map passes none when it changes hole: it is
+// recording WHERE the golfer is, not what they typed, and carrying hole 4's
+// numbers onto hole 5 would seed the next hole with the last one's score.
+// Anything already entered is autosaved, so nothing is lost by omitting it.
+export function setHoleEntryState(roundId, holeNumber, draft = null) {
+  holeEntryState = {
+    roundId,
+    holeNumber,
+    draft: draft ? { ...draft, clubs_used: [...(draft.clubs_used || [])] } : null,
+  };
 }
 
 // Returns the remembered position/draft for this round, or null. Reading
@@ -128,7 +136,7 @@ export function getHoleEntryState(roundId) {
   return {
     roundId: holeEntryState.roundId,
     holeNumber: holeEntryState.holeNumber,
-    draft: { ...draft, clubs_used: [...(draft?.clubs_used || [])] },
+    draft: draft ? { ...draft, clubs_used: [...(draft.clubs_used || [])] } : null,
   };
 }
 

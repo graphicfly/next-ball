@@ -224,3 +224,75 @@ export function manualCourse({ name, city = null, state = null }) {
     source: 'manual',
   });
 }
+
+// ---------- Resolving a hand-typed course to a mapped one ----------
+//
+// A course added through manual entry stores no coordinates and no
+// place_id, so nothing can ever be looked up for it — no geometry, no
+// greens, no map. That is not a rare corner: a course whose sign says
+// "Oakmont Golf Center" is named "Oakmont Golf Course" in OSM, so searching
+// the name a golfer actually knows finds nothing and manual entry is the
+// only way in. Their own course was then permanently unmappable.
+//
+// The device knows which course they are standing on. Resolving from that
+// is safe only if the match is checked, because a golfer adding a course
+// from their sofa would otherwise have a neighbouring course's greens
+// cached against it permanently.
+
+// Words that appear on half the courses in the world and so carry no
+// identifying information. What is left after removing them is the part a
+// human would actually use to tell two courses apart.
+const GENERIC_COURSE_WORDS = new Set([
+  'golf', 'course', 'club', 'country', 'links', 'center', 'centre', 'centre',
+  'national', 'municipal', 'muni', 'park', 'resort', 'the', 'at', 'of', 'and',
+  'cc', 'gc', 'g', 'c', 'public', 'private', 'driving', 'range',
+]);
+
+export function distinctiveNameTokens(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !GENERIC_COURSE_WORDS.has(w));
+}
+
+// True when two course names share a distinctive word. Deliberately loose
+// on the generic half and strict on the rest: "Oakmont Golf Center" matches
+// "Oakmont Golf Course", and neither matches "Westwood Country Club".
+//
+// A name made entirely of generic words yields no tokens and therefore
+// never matches anything, which is the safe outcome — better to leave a
+// course unmapped than to attach it to the wrong one.
+export function courseNamesLikelySame(a, b) {
+  const ta = distinctiveNameTokens(a);
+  const tb = distinctiveNameTokens(b);
+  if (!ta.length || !tb.length) return false;
+  return ta.some((w) => tb.includes(w));
+}
+
+// Whether location is ALREADY granted. Used to decide whether a background
+// resolve may run at all: this happens without the golfer asking for it, so
+// it must never be the thing that raises a permission prompt. A browser with
+// no Permissions API is treated as not granted, which costs nothing — the
+// golfer can still use "Use My Location" on course selection, which asks
+// explicitly and in context.
+export async function geolocationAlreadyGranted() {
+  try {
+    if (!navigator.permissions?.query) return false;
+    const status = await navigator.permissions.query({ name: 'geolocation' });
+    return status.state === 'granted';
+  } catch (e) {
+    return false;
+  }
+}
+
+// Finds the mapped course the golfer is standing on, when it plausibly IS
+// the course they typed. Returns null in every uncertain case — no
+// permission, no fix, nothing nearby, or nothing whose name matches.
+export async function resolveManualCourseFromDevice(courseName) {
+  if (!await geolocationAlreadyGranted()) return null;
+  const { status, courses } = await nearbyCoursesFromDevice();
+  if (status !== LOOKUP_STATUS.OK || !courses.length) return null;
+  // Nearest first, so the closest plausible name wins.
+  return courses.find((c) => courseNamesLikelySame(c.name, courseName)) || null;
+}

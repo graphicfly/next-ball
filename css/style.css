@@ -135,6 +135,14 @@ html, body {
   background: var(--color-bg);
 }
 
+/* The `hidden` attribute means hidden, everywhere.
+   An author `display: flex` beats the UA stylesheet's [hidden] rule even at
+   equal specificity, because author sheets win ties over user-agent ones —
+   so any component that sets display and is toggled with `hidden` silently
+   stays visible. This codebase hit that four separate times and patched it
+   per class each time; one rule retires the whole category. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   overflow: hidden;
@@ -1576,7 +1584,6 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
   background: var(--color-warning);
   border: 1.5px solid var(--color-surface);
 }
-.nav-dot[hidden] { display: none; }
 .nav-item.active { color: var(--color-accent); background: var(--color-accent-soft); }
 .nav-item:active { transform: scale(0.96); }
 
@@ -2044,7 +2051,6 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
   gap: var(--space-2);
   margin-bottom: var(--space-3);
 }
-.batch-select-controls[hidden] { display: none; }
 .batch-filter-tab {
   min-height: 34px;
   padding: 6px var(--space-3);
@@ -2417,12 +2423,6 @@ textarea { min-height: 76px; resize: vertical; }
   display: flex;
   align-items: center;
 }
-/* An author display:flex normally beats the UA [hidden] default even at
-   equal specificity (author stylesheets win ties over user-agent ones) —
-   Edit Shots toggles #enterSelectBtn's hidden attribute at runtime, so this
-   is needed for that toggle to actually hide it. */
-.topbar .back[hidden] { display: none; }
-
 /* ---------- Explore Session accordion ---------- */
 /* Four collapsible sections, all closed on open, one open at a time. The
    section container is the only card on the screen — individual metrics
@@ -2496,7 +2496,6 @@ textarea { min-height: 76px; resize: vertical; }
    and this takes over — so the panel sits at auto height and can still grow
    if its own content expands (the nested "More distance stats" toggle). */
 .xs-section.open .xs-body { height: auto; }
-.xs-body[hidden] { display: none; }
 .xs-body-inner { padding: 0 var(--space-4) var(--space-4); }
 .xs-body-inner > .section-title:first-child { margin-top: 0; }
 
@@ -3461,3 +3460,41 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   font-size: 10px;
 }
 .hole-map-canvas .maplibregl-ctrl-attrib a { color: rgba(245, 247, 248, 0.8); }
+
+/* Hole navigation on the map (§14.5 keeps the imagery and the yardage the
+   subject, so this is a quiet row beneath the readout — never large buttons
+   overlaid on the course). */
+.hole-map-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.hole-map-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.hole-map-nav-btn svg { width: 18px; height: 18px; }
+.hole-map-nav-btn:disabled { opacity: 0.3; cursor: default; }
+.hole-map-nav-btn:not(:disabled):active { transform: scale(0.97); }
+.hole-map-nav-btn:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.hole-map-nav-position {
+  font-size: var(--text-caption);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+/* A hole with no mapping still renders the frame, so the nav row stays in
+   the same place and the screen does not jump as the golfer walks between
+   mapped and unmapped holes. */
+.hole-map-canvas.unmapped { background: var(--color-surface-2); }

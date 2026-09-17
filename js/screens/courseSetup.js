@@ -2,6 +2,7 @@ import * as db from '../db.js';
 import { qs, qsa, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
 import { getPendingCourseId, clearPendingCourse } from '../state.js';
 import { courseCoverage, COVERAGE, loadCourseGeometry, teeSetsFromGeometry, GEOMETRY_STATUS } from '../courseGeometry.js';
+import { resolveManualCourseFromDevice } from '../courseProvider.js';
 
 // Course Details — docs/course-mode-spec.md §14.2, Reference A.
 //
@@ -200,15 +201,37 @@ function draw(root, courseId) {
 function ensureGeometry(courseId, root) {
   const course = db.getCourse(courseId);
   if (!course || db.courseGeometryChecked(courseId)) return;
-  // Nothing to look up without a location — a hand-typed course stays
-  // manual and is fully first-class (§14.7 D).
-  if (!Number.isFinite(course.latitude) && !course.place_id) return;
 
-  loadCourseGeometry({
-    latitude: course.latitude,
-    longitude: course.longitude,
-    place_id: course.place_id,
-  }).then(({ status, geometry }) => {
+  // A hand-typed course has no coordinates, so there is nothing to query.
+  // Before giving up on it, see whether the golfer is standing on a mapped
+  // course of the same name — which is the normal case, since they are on
+  // Course Details about to tee off. A match upgrades the record in place
+  // and the ordinary lookup below then works; anything uncertain records
+  // nothing and leaves the course exactly as manual and first-class as it
+  // was (§14.7 D). This never raises a permission prompt on its own.
+  const start = (!Number.isFinite(course.latitude) && !course.place_id)
+    ? resolveManualCourseFromDevice(course.name).then((match) => {
+      if (!match) return null;
+      return db.upsertCourse({
+        ...course,
+        latitude: match.latitude,
+        longitude: match.longitude,
+        place_id: match.place_id,
+        provider: match.provider,
+      });
+    })
+    : Promise.resolve(course);
+
+  start.then((resolved) => {
+    if (!resolved) return null;
+    return loadCourseGeometry({
+      latitude: resolved.latitude,
+      longitude: resolved.longitude,
+      place_id: resolved.place_id,
+    });
+  }).then((result) => {
+    if (!result) return;
+    const { status, geometry } = result;
     // An unreachable service is NOT recorded as "checked": the course may
     // well be mapped, and marking it checked would mean never looking
     // again. A genuine "no features" answer is recorded, so an unmapped

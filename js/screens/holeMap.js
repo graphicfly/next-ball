@@ -2,6 +2,7 @@ import * as db from '../db.js';
 import { qs, escapeHtml } from '../ui.js';
 import { greenEdgeYards, yardsBetween, metersToYards, bearingDegrees, boundsOf } from '../geo.js';
 import { watchPosition, POSITION_STATE, accuracyTier, yardagesUsable } from '../livePosition.js';
+import { setHoleEntryState } from '../state.js';
 import { loadMapLibre } from '../mapLibreLoader.js';
 
 // Hole Map — docs/course-mode-spec.md §14.5, Reference C.
@@ -38,6 +39,8 @@ function icon(paths) {
 const ICON_RECENTRE = '<circle cx="12" cy="12" r="3.2" /><circle cx="12" cy="12" r="7.5" /><path d="M12 2v2.2" /><path d="M12 19.8V22" /><path d="M2 12h2.2" /><path d="M19.8 12H22" />';
 const ICON_LAYERS = '<path d="M12 3 3 7.5l9 4.5 9-4.5L12 3Z" /><path d="m3 12.5 9 4.5 9-4.5" /><path d="m3 17 9 4.5 9-4.5" />';
 const ICON_COMPASS = '<circle cx="12" cy="12" r="8.5" /><path d="m14.8 9.2-1.6 4.4-4.4 1.6 1.6-4.4 4.4-1.6Z" />';
+const ICON_PREV = '<path d="M14.5 5.5 8 12l6.5 6.5" />';
+const ICON_NEXT = '<path d="M9.5 5.5 16 12l-6.5 6.5" />';
 
 const STATE_COPY = {
   [POSITION_STATE.LOCATING]: 'Locating…',
@@ -56,17 +59,28 @@ export function renderHoleMap(root, holeNumberParam) {
   // course geometry was resolved once and stored on the course record.
   const green = db.getGreenForHole(round.course_id, holeNumber);
 
-  // Hole Entry's pill is gated on exactly this, so arriving without it means
-  // a stale link or a course removed mid-round. Handled anyway (§14.8).
-  if (!def || !green?.centroid) { location.hash = '#/course/round'; return; }
+  // A hole number the round does not have is a broken link, not a state —
+  // there is nothing to navigate between, so go back.
+  if (!def) { location.hash = '#/course/round'; return; }
 
-  const centroid = green.centroid;
-  const polygon = green.polygon?.length >= 3 ? green.polygon : null;
+  // A hole with no mapping is a legitimate state, not an error: coverage is
+  // per hole (§14.7), so walking forward from a mapped hole to an unmapped
+  // one is normal. The screen still renders, still navigates, and says
+  // plainly that there is no map — it never invents a position or a yardage
+  // to fill the space.
+  const hasMapping = !!green?.centroid;
+  const centroid = green?.centroid || null;
+  const polygon = green?.polygon?.length >= 3 ? green.polygon : null;
+
+  // The map and Course Session share one current hole. Recording it here —
+  // without a draft — means Back lands on whatever hole the golfer
+  // navigated to, and hole entry loads that hole's own saved values.
+  setHoleEntryState(round.round_id, holeNumber);
 
   // The hole's own tee, as associated by the geometry layer. Read, never
   // re-derived here — §14.7 is explicit that guessing tee associations from
   // proximity is wrong, and that work is already done and tested.
-  const teeCentroid = teeForRound(round, holeNumber);
+  const teeCentroid = hasMapping ? teeForRound(round, holeNumber) : null;
 
   // Published, from the selected tee's snapshot. Never the live number, and
   // never reconciled against it (§14.6).
@@ -85,8 +99,8 @@ export function renderHoleMap(root, holeNumberParam) {
         <span class="side-space"></span>
       </div>
 
-      <div class="hole-map-canvas" id="mapCanvas">
-        <div class="hole-map-fallback" id="mapFallback" hidden></div>
+      <div class="hole-map-canvas ${hasMapping ? '' : 'unmapped'}" id="mapCanvas">
+        <div class="hole-map-fallback" id="mapFallback" ${hasMapping ? 'hidden' : ''}>${hasMapping ? '' : 'Map unavailable for this hole.'}</div>
         <div class="hole-map-controls" id="mapControls" hidden>
           <button class="map-control" id="recentreBtn" aria-label="Recentre on your position">${icon(ICON_RECENTRE)}</button>
           <button class="map-control" id="layersBtn" aria-label="Switch imagery">${icon(ICON_LAYERS)}</button>
@@ -106,6 +120,19 @@ export function renderHoleMap(root, holeNumberParam) {
         </div>
       </div>
       <div class="hole-map-message" id="stateMessage" role="status" hidden></div>
+
+      <!-- Secondary by design (§14.5 keeps the map and the yardage the
+           subject): a quiet row beneath the readout, never large buttons
+           overlaid on the imagery. -->
+      <div class="hole-map-nav">
+        <button class="hole-map-nav-btn" id="prevHoleBtn" ${holeNumber <= 1 ? 'disabled' : ''}>
+          ${icon(ICON_PREV)}<span>Previous</span>
+        </button>
+        <span class="hole-map-nav-position">Hole ${holeNumber} of ${round.hole_count}</span>
+        <button class="hole-map-nav-btn" id="nextHoleBtn" ${holeNumber >= round.hole_count ? 'disabled' : ''}>
+          <span>Next</span>${icon(ICON_NEXT)}
+        </button>
+      </div>
     </div>
   `;
 
@@ -135,13 +162,29 @@ export function renderHoleMap(root, holeNumberParam) {
     window.removeEventListener('hashchange', onHashChange);
     if (map) { try { map.remove(); } catch (e) { /* already gone */ } map = null; }
   }
+  // Compared against this screen's OWN hash, not the route prefix. Hole-to-
+  // hole navigation changes the hash within the same route, so a prefix
+  // check would skip teardown and leave the previous map instance and its
+  // watch running behind the new one.
+  const myHash = `#/course/map/${holeNumber}`;
   function onHashChange() {
-    if (!location.hash.startsWith('#/course/map/')) dispose();
+    if (location.hash !== myHash) dispose();
   }
   window.addEventListener('hashchange', onHashChange);
 
   const leave = () => { dispose(); location.hash = '#/course/round'; };
   qs('#backBtn', root).addEventListener('click', leave);
+
+  // Navigation moves the shared current hole and nothing else. It never
+  // saves, completes or edits a hole — anything already entered stays
+  // exactly as it was, because hole entry autosaved it.
+  const goToHole = (n) => {
+    if (n < 1 || n > round.hole_count) return;
+    setHoleEntryState(round.round_id, n);
+    location.hash = `#/course/map/${n}`;
+  };
+  qs('#prevHoleBtn', root).addEventListener('click', () => goToHole(holeNumber - 1));
+  qs('#nextHoleBtn', root).addEventListener('click', () => goToHole(holeNumber + 1));
 
   // ---------- readout ----------
   function showState(state) {
@@ -217,6 +260,14 @@ export function renderHoleMap(root, holeNumberParam) {
   }
 
   // ---------- map ----------
+  if (!hasMapping) {
+    // Nothing to draw and nothing to measure, so no tiles are fetched and
+    // no watch is started — §14.9 forbids tracking that serves no purpose.
+    distanceEl.textContent = '—';
+    accuracyValueEl.textContent = '—';
+    return;
+  }
+
   loadMapLibre().then((gl) => {
     if (disposed) return;
     buildMap(gl);

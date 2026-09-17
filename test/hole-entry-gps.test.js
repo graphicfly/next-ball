@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { resetDB } from './setup.js';
 import { buildCourseGeometry, teeSetsFromGeometry } from '../js/courseGeometry.js';
 import { setHoleEntryState, getHoleEntryState, clearHoleEntryState } from '../js/state.js';
+import { courseNamesLikelySame, distinctiveNameTokens } from '../js/courseProvider.js';
 
 // Hole Entry GPS integration — docs/course-mode-spec.md §14.4.
 //
@@ -180,5 +181,82 @@ describe('Hole-entry state survives the map round trip (§14.4)', () => {
     assert.equal(db.roundHolesPlayed(round.round_id), before, 'no phantom hole');
     assert.equal(db.getHole(round.round_id, 5), null);
     clearHoleEntryState();
+  });
+});
+
+describe('Hole navigation shares one current hole (§14.5)', () => {
+  test('setting a hole without a draft records position only', async () => {
+    clearHoleEntryState();
+    setHoleEntryState('r1', 5);
+    const s = getHoleEntryState('r1');
+    assert.equal(s.holeNumber, 5);
+    assert.equal(s.draft, null, 'hole 4 numbers must not seed hole 5');
+  });
+
+  test('a later hole change replaces the carried draft rather than keeping it', async () => {
+    clearHoleEntryState();
+    setHoleEntryState('r1', 4, { strokes: 6, clubs_used: ['7i'], putts: 2, short_game_strokes: 1 });
+    assert.equal(getHoleEntryState('r1').draft.strokes, 6);
+    setHoleEntryState('r1', 5);
+    assert.equal(getHoleEntryState('r1').holeNumber, 5);
+    assert.equal(getHoleEntryState('r1').draft, null);
+  });
+
+  test('navigating never writes a hole record', async () => {
+    const db = await resetDB();
+    const { round } = await seedRound(db, OAKMONT);
+    db.upsertHole(round.round_id, 1, { strokes: 5, putts: 2 });
+    const before = db.roundHolesPlayed(round.round_id);
+    const hole1 = JSON.stringify(db.getHole(round.round_id, 1));
+
+    for (const n of [2, 3, 4, 3, 2]) setHoleEntryState(round.round_id, n);
+
+    assert.equal(db.roundHolesPlayed(round.round_id), before, 'no hole created by moving between them');
+    assert.equal(JSON.stringify(db.getHole(round.round_id, 1)), hole1, 'entered data untouched');
+    assert.equal(db.getHole(round.round_id, 3), null);
+    clearHoleEntryState();
+  });
+
+  test('a hole with no mapping is a state to navigate through, not a dead end', async () => {
+    const db = await resetDB();
+    const partial = JSON.parse(JSON.stringify(OAKMONT));
+    for (const h of partial.holes) if ([2, 5, 7].includes(h.hole_number)) h.green = null;
+    const { course } = await seedRound(db, partial);
+
+    // Walking 1 -> 2 -> 3 crosses a gap; only the middle hole lacks a green,
+    // and the holes either side are unaffected.
+    assert.ok(db.getGreenForHole(course.course_id, 1)?.centroid);
+    assert.equal(db.getGreenForHole(course.course_id, 2), null);
+    assert.ok(db.getGreenForHole(course.course_id, 3)?.centroid);
+    // ...and the published yardage is still there for the unmapped hole, so
+    // its header is complete even with no map.
+    const defs = db.resolveHoleDefs(course.course_id, { holeCount: 9, teeId: 'blue' });
+    assert.equal(defs.find((d) => d.hole_number === 2).yardage, 157);
+  });
+});
+
+describe('A hand-typed course can be resolved from the device', () => {
+  test('names match on their distinctive word, not their generic ones', async () => {
+    assert.equal(courseNamesLikelySame('Oakmont Golf Center', 'Oakmont Golf Course'), true,
+      'the sign says Center, OSM says Course — this is the case that broke');
+    assert.equal(courseNamesLikelySame('Reston National', 'Reston National Golf Course'), true);
+    assert.equal(courseNamesLikelySame('Oakmont Golf Center', 'Westwood Country Club'), false);
+  });
+
+  test('a name made only of generic words never matches anything', async () => {
+    // Better to leave a course unmapped than attach it to the wrong one.
+    assert.deepEqual(distinctiveNameTokens('The Golf Club'), []);
+    assert.equal(courseNamesLikelySame('Municipal Golf Course', 'Riverside Municipal Golf Course'), false);
+    assert.equal(courseNamesLikelySame('Golf Course', 'Golf Course'), false);
+  });
+
+  test('matching is case and punctuation insensitive', async () => {
+    assert.equal(courseNamesLikelySame("ST. ANDREWS", 'st andrews links'), true);
+    assert.equal(courseNamesLikelySame('Pine-Valley', 'Pine Valley Golf Club'), true);
+  });
+
+  test('empty or missing names match nothing', async () => {
+    assert.equal(courseNamesLikelySame('', 'Oakmont Golf Course'), false);
+    assert.equal(courseNamesLikelySame(null, undefined), false);
   });
 });
