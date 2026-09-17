@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v70';
+const CACHE_NAME = 'nextball-v71';
 // NOTE: vendor/maplibre is deliberately NOT precached (§14.5). At 1.01 MB it
 // is larger than the entire rest of the app, for a screen half of all
 // courses cannot show — precaching it would roughly double a fresh install.

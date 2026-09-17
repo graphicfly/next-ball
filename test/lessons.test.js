@@ -349,3 +349,78 @@ describe('Backup and restore — lessons must not be silently dropped', () => {
     assert.equal(db.getActiveSwingFocus(), null);
   });
 });
+
+// §3.1 and §8: three systems can want to tell the golfer what to work on.
+// The resolution is a precedence order, not a merge — and Active Focus and
+// Next Goal are different axes that must never be treated as alternatives.
+// These tests exist because the failure mode is silent: a focus quietly
+// retiring a goal would look like tidiness rather than like data loss.
+describe('Active Focus and Next Goal coexist — §3.1, §8', () => {
+  const LESSON_B = { date: '2026-09-13', instructor_name: 'Gaza', cues: ['Stay over it'] };
+
+  function goalFor(db, sessionId) {
+    return db.createGoal(sessionId, {
+      type: 'solid_contact', target: 60, club: null,
+      text: '60% solid contact', metric: 'solidPct',
+    });
+  }
+
+  test('setting a focus never retires, alters or supersedes an outstanding goal', async () => {
+    const db = await resetDB();
+    const goal = goalFor(db, 'session-1');
+    const lesson = db.createLesson(LESSON_B);
+    db.setActiveSwingFocus(lesson.lesson_id);
+
+    const after = db.getActiveGoal();
+    assert.equal(after.goal_id, goal.goal_id);
+    assert.equal(after.status, 'active');
+    assert.equal(after.superseded_by, null);
+    assert.equal(after.resolved_at, null);
+  });
+
+  test('a goal is not a focus and a focus is not a goal — neither collapses into the other', async () => {
+    const db = await resetDB();
+    goalFor(db, 'session-1');
+    const lesson = db.createLesson(LESSON_B);
+    db.setActiveSwingFocus(lesson.lesson_id);
+
+    // Two live records of two different kinds, in two different collections.
+    assert.equal(db.getActiveGoal().text, '60% solid contact');
+    assert.equal(db.getActiveSwingFocus().cue_text, 'Stay over it');
+    // A cue is never converted into a measurable target (§3.1).
+    assert.equal(db.getActiveGoal().metric, 'solidPct');
+    assert.equal(db.getActiveSwingFocus().cue_text.includes('%'), false);
+  });
+
+  test('clearing the focus leaves the goal standing, and vice versa', async () => {
+    const db = await resetDB();
+    const goal = goalFor(db, 'session-1');
+    const lesson = db.createLesson(LESSON_B);
+    db.setActiveSwingFocus(lesson.lesson_id);
+
+    db.clearActiveSwingFocus();
+    assert.equal(db.getActiveGoal().goal_id, goal.goal_id);
+
+    db.setActiveSwingFocus(lesson.lesson_id);
+    db.resolveGoal(goal.goal_id, 'met');
+    assert.equal(db.getActiveGoal(), null);
+    assert.equal(db.getActiveSwingFocus().cue_text, 'Stay over it');
+  });
+
+  test('a session started with both records both, independently', async () => {
+    const db = await resetDB();
+    goalFor(db, 'session-1');
+    const lesson = db.createLesson(LESSON_B);
+    db.setActiveSwingFocus(lesson.lesson_id);
+
+    const s = db.createSession({
+      date: '2026-09-17', start_time: '10:00', target_ball_count: 50,
+      default_club: '7i', default_setup: 'normal', default_surface: 'mat', default_swing: 'full',
+    });
+    // The focus is snapshotted onto the session; the goal keeps living in
+    // its own collection, evaluated by its own machinery.
+    assert.equal(s.swing_focus.cue_text, 'Stay over it');
+    assert.equal(s.swing_focus.target, undefined);
+    assert.equal(db.getActiveGoal().status, 'active');
+  });
+});

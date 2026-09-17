@@ -109,6 +109,12 @@ export function renderStart(root) {
   // because the plan already carries the cue as its reason line (§4.2).
   function practiceLineHtml() {
     if (pendingPlan) {
+      // §5's example reads "Using: Low-point control · from your lesson
+      // with Gaza", where the title is a topic and the provenance adds the
+      // source. Our lesson plans are titled "Lesson with Gaza" already
+      // (lessonPlan.js declines to invent a topic from the cue), so the
+      // provenance clause would repeat the title word for word. The title
+      // carries it instead.
       return `<div class="practice-line"><span class="practice-line-label">Using</span><span class="practice-line-text">${escapeHtml(pendingPlan.focus_title)}</span></div>`;
     }
     if (!swingFocus) return '';
