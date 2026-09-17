@@ -469,17 +469,25 @@ export function courseCoverage(course) {
   const holeCount = Number.isFinite(course?.hole_count) ? course.hole_count : 0;
   const holes = geometry?.holes || [];
 
+  // Only a green tied to a specific hole counts as mapped, because that is
+  // the question every downstream decision actually asks: can THIS hole
+  // show a live yardage? The View Map pill reads getGreenForHole(), so
+  // anything else here is a promise the rest of the app cannot keep.
+  //
+  // This deliberately reports a greens-but-no-hole-lines course as unmapped
+  // even though §14.7 rule 2 says such a course IS usable — Burke Lake has
+  // 18 greens and no golf=hole features. That rule resolves the green from
+  // the golfer's own position on first play and remembers it per course,
+  // and that resolution is not built. Counting those greens here made
+  // Course Details advertise "GPS map available · All 9 greens mapped" for
+  // a course on which the map was unreachable from every hole.
+  //
+  // greensOnProperty is still reported, because it is exactly what rule 2
+  // will consume: when that lands, it will associate these greens to holes
+  // and greensAssociated will rise on its own. Nothing here needs inverting.
   const greensAssociated = holes.filter((h) => h.green).length;
-  // Greens that no hole line claimed still count. §14.7 rule 2: a course
-  // with greens and no golf=hole features — Burke Lake has 18 of them — is
-  // usable, because the green is resolved at play time from the golfer's
-  // own position, which is reliable precisely because they are standing on
-  // the hole they are playing. Capped at the hole count so the status row
-  // can never read "18 of 9".
   const greensOnProperty = (geometry?.greens || []).length;
-  const greensMapped = greensAssociated > 0
-    ? greensAssociated
-    : Math.min(greensOnProperty, holeCount || greensOnProperty);
+  const greensMapped = greensAssociated;
   const holesWithTeeYardage = holes.filter((h) => h.tees && h.tees.length).length;
   const teeSets = Array.isArray(course?.tees) ? course.tees : [];
 

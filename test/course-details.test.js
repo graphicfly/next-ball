@@ -35,14 +35,20 @@ describe('Coverage levels (§14.7) — internal, never shown as words', () => {
     assert.equal(cov.teeSets.length, 2);
   });
 
-  test('greens without hole lines degrade to green-centre-only', async () => {
+  // Greens that no hole line claimed are NOT reported as mapped, because
+  // nothing in the app can yet say which green belongs to which hole. §14.7
+  // rule 2 resolves that from the golfer's position on first play; until it
+  // exists, claiming a map here advertises something unreachable.
+  test('greens without hole lines are not yet claimable as a map', async () => {
     const db = await resetDB();
     const c = await courseWith(db, { geometry: GREENS_ONLY, tees: teeSetsFromGeometry(GREENS_ONLY, 9) });
     const cov = courseCoverage(c);
-    assert.equal(cov.level, COVERAGE.GREENS_ONLY);
     assert.equal(cov.holesWithTeeYardage, 0);
     assert.equal(cov.teeSets.length, 0, 'no tee set is invented without a line to associate it');
-    assert.equal(cov.hasMap, true, 'the map still has value — greens are what live yardage needs');
+    assert.equal(cov.greensOnProperty, 9, 'the greens are still recorded for §14.7 rule 2');
+    assert.equal(cov.greensAssociated, 0, 'but none is tied to a hole');
+    assert.equal(cov.hasMap, false, 'so no map is advertised');
+    assert.equal(cov.level, COVERAGE.UNMAPPED);
   });
 
   test('yardages but no greens is scorecard-only, and offers no map', async () => {
@@ -321,24 +327,50 @@ describe('Traced par pre-fills, but never overwrites the golfer (§14.7)', () =>
   });
 });
 
-describe('Greens with no hole lines are still mapped (§14.7 rule 2)', () => {
-  test('a Burke-Lake-shaped course counts its unassociated greens', async () => {
+describe('Coverage never promises a map the app cannot show', () => {
+  // The invariant this whole section exists to protect: if Course Details
+  // says "GPS map available", at least one hole must actually be able to
+  // open the map. Advertising a map that no hole can reach is the exact
+  // defect this replaced.
+  const canOpenMapOnSomeHole = (db, courseId, holeCount) => {
+    for (let n = 1; n <= holeCount; n++) if (db.getGreenForHole(courseId, n)?.centroid) return true;
+    return false;
+  };
+
+  test('a traced course advertises a map and can open one', async () => {
     const db = await resetDB();
-    const c = await courseWith(db, { geometry: GREENS_ONLY, tees: [] });
-    const cov = courseCoverage(db.getCourse(c.course_id));
-    assert.equal(cov.greensAssociated, 0, 'nothing says which green is which hole');
-    assert.equal(cov.greensOnProperty, 9);
-    assert.equal(cov.greensMapped, 9, 'but they are still mapped and usable');
-    assert.equal(cov.hasMap, true);
-    assert.equal(cov.level, COVERAGE.GREENS_ONLY);
+    const c = await courseWith(db, { geometry: OAKMONT, tees: teeSetsFromGeometry(OAKMONT, 9) });
+    assert.equal(courseCoverage(db.getCourse(c.course_id)).hasMap, true);
+    assert.equal(canOpenMapOnSomeHole(db, c.course_id, 9), true);
   });
 
-  test('the count never exceeds the holes being played', async () => {
+  test('a greens-only course advertises none, and can open none', async () => {
     const db = await resetDB();
-    // 9 greens on the property, golfer playing a 9-hole course: fine. Now
-    // pretend the course record says fewer holes than greens found.
-    const cov = courseCoverage({ hole_count: 3, geometry: GREENS_ONLY, tees: [] });
-    assert.equal(cov.greensMapped, 3, 'never "9 of 3"');
+    const c = await courseWith(db, { geometry: GREENS_ONLY, tees: [] });
+    assert.equal(courseCoverage(db.getCourse(c.course_id)).hasMap, false);
+    assert.equal(canOpenMapOnSomeHole(db, c.course_id, 9), false, 'the claim and the reality agree');
+  });
+
+  test('a partially traced course advertises a map and can open it on the mapped holes only', async () => {
+    const db = await resetDB();
+    const partial = JSON.parse(JSON.stringify(OAKMONT));
+    for (const h of partial.holes) if ([2, 5, 7].includes(h.hole_number)) h.green = null;
+    const c = await courseWith(db, { geometry: partial, tees: teeSetsFromGeometry(OAKMONT, 9) });
+
+    const cov = courseCoverage(db.getCourse(c.course_id));
+    assert.equal(cov.hasMap, true);
+    assert.equal(cov.greensMapped, 6, 'and says six, not nine');
+    const openable = [];
+    for (let n = 1; n <= 9; n++) if (db.getGreenForHole(c.course_id, n)?.centroid) openable.push(n);
+    assert.deepEqual(openable, [1, 3, 4, 6, 8, 9]);
+    assert.equal(openable.length, cov.greensMapped, 'the count matches what can actually be opened');
+  });
+
+  test('an unmapped course advertises none, and can open none', async () => {
+    const db = await resetDB();
+    const c = await courseWith(db, { name: 'Hand Typed Muni' });
+    assert.equal(courseCoverage(db.getCourse(c.course_id)).hasMap, false);
+    assert.equal(canOpenMapOnSomeHole(db, c.course_id, 9), false);
   });
 });
 

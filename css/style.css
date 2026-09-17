@@ -3498,3 +3498,40 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
    the same place and the screen does not jump as the golfer walks between
    mapped and unmapped holes. */
 .hole-map-canvas.unmapped { background: var(--color-surface-2); }
+
+/* Hole Map in landscape.
+   Stacked vertically, the readout, the hole nav and the bottom nav leave the
+   map about 113px on a 430px-tall screen — a strip too short to read, with
+   the chips' fixed 44px offsets crowding its edges. Landscape has width to
+   spare, so the readout and nav move beside the map instead of beneath it
+   and the map keeps nearly the full height.
+   Scoped to short landscape only: a tablet in landscape is tall enough for
+   the portrait layout, which is the better one wherever it fits. */
+@media (orientation: landscape) and (max-height: 540px) {
+  .hole-map-screen {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 266px);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    column-gap: var(--space-3);
+  }
+  .hole-map-topbar { grid-column: 1 / -1; grid-row: 1; }
+  /* Spans every content row so the map fills the left side whatever the
+     right column holds. Keeps its left bleed; the right edge now meets the
+     readout rather than the screen. */
+  .hole-map-canvas {
+    grid-column: 1;
+    grid-row: 2 / -1;
+    margin: 0 0 0 calc(-1 * var(--space-4));
+  }
+  .hole-map-readout { grid-column: 2; grid-row: 2; align-self: start; margin-top: 0; }
+  .hole-map-message { grid-column: 2; grid-row: 3; }
+  .hole-map-nav { grid-column: 2; grid-row: 4; }
+
+  /* The readout is the only thing that has to shrink, and it shrinks by
+     losing padding rather than legibility — the distance stays the largest
+     thing on the screen. */
+  .hole-map-readout { flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-3); }
+  .hole-map-readout-divider { width: 100%; height: 1px; align-self: stretch; }
+  .hole-map-readout-side { align-items: flex-start; }
+  .hole-map-distance { font-size: var(--text-display-lg); }
+}
