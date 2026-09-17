@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v73';
+const CACHE_NAME = 'nextball-v74';
 // NOTE: vendor/maplibre is deliberately NOT precached (§14.5). At 1.01 MB it
 // is larger than the entire rest of the app, for a screen half of all
 // courses cannot show — precaching it would roughly double a fresh install.
@@ -90,18 +90,46 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Same-origin paths that are DATA, not application shell. Everything the
+// cache below holds is treated as immutable until CACHE_NAME changes, which
+// is right for a versioned app shell and wrong for anything that answers a
+// question: one stale response would outlive the question that asked it.
+//
+// Reserved in advance, before any of these exist. The app has no same-origin
+// endpoint today — this is here so that adding the first one cannot quietly
+// inherit app-shell caching, which would be invisible until a golfer saw an
+// answer from last week.
+//
+// The stronger protection is to put any future API on a DIFFERENT ORIGIN
+// (api.nextballgolf.com), which never reaches this handler at all. This is
+// the backstop for when that is not possible.
+const DYNAMIC_PATHS = ['/api/', '/media/', '/analysis/'];
+
+function isDynamicPath(url) {
+  return DYNAMIC_PATHS.some((prefix) => url.pathname.startsWith(prefix));
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // never intercept weather/API calls
+  if (isDynamicPath(url)) return;                  // data, not app shell — never cached
+  // A ranged request asks for part of a file, and video playback is built
+  // almost entirely out of them. The response is a 206, which `ok` happily
+  // accepts — so without this the cache would fill with fragments and later
+  // serve one as though it were the whole file.
+  if (req.headers.has('Range')) return;
 
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
       return fetch(req)
         .then((res) => {
-          if (res && res.ok) {
+          // Exactly 200, and only a same-origin response we fetched
+          // ourselves. `res.ok` spans 200-299, which would let a 206 in;
+          // `type === 'basic'` keeps opaque and cross-origin responses out.
+          if (res && res.status === 200 && res.type === 'basic') {
             const clone = res.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
           }
