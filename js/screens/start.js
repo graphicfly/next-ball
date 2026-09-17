@@ -72,6 +72,15 @@ export function renderStart(root) {
   // value stays fully editable, because a plan is a starting point rather
   // than a lock.
   const pendingPlan = getPendingPlanId() ? db.getPlan(getPendingPlanId()) : null;
+  // The one thing V4.2 adds to this screen (lesson-spec.md §5): a single
+  // line naming what the golfer is about to practise. Not a card, and
+  // nothing per-shot — shot entry stays exactly as fast as it was.
+  //
+  // One cue, not all three. §5's example chains them, but this screen must
+  // still fit without scrolling (ux-spec.md §4.2) and three cues do not fit
+  // on one line at 375px; the primary cue is also the one thought §3 exists
+  // to protect. The rest are on the Lesson Summary.
+  const swingFocus = db.getActiveSwingFocus();
   const planBalls = pendingPlan ? planBallCount(pendingPlan.steps) : null;
   const planClub = pendingPlan?.focus_type === 'club' ? pendingPlan.focus_club : null;
 
@@ -94,6 +103,17 @@ export function renderStart(root) {
     focus: [],
     notes: '',
   };
+
+  // Shown only when there is something to show, and absent otherwise
+  // (ux-spec.md §1.4). A plan in use takes precedence over the bare focus,
+  // because the plan already carries the cue as its reason line (§4.2).
+  function practiceLineHtml() {
+    if (pendingPlan) {
+      return `<div class="practice-line"><span class="practice-line-label">Using</span><span class="practice-line-text">${escapeHtml(pendingPlan.focus_title)}</span></div>`;
+    }
+    if (!swingFocus) return '';
+    return `<div class="practice-line"><span class="practice-line-label">Practicing</span><span class="practice-line-text">${escapeHtml(swingFocus.cue_text)}</span></div>`;
+  }
 
   function pillHtml(group, value, label, selected) {
     return `<button type="button" class="setup-pill${selected ? ' selected' : ''}" data-group="${group}" data-value="${escapeHtml(String(value))}" aria-pressed="${selected}">${escapeHtml(label)}</button>`;
@@ -166,6 +186,8 @@ export function renderStart(root) {
             <div class="setup-heading-title">Set Up Your Session</div>
             <div class="setup-heading-sub">Dial in your practice before you start.</div>
           </div>
+
+          ${practiceLineHtml()}
 
           ${setupRowHtml(ICON_CLUB, 'Club', '', clubPillsHtml(), 'clubPills')}
           ${setupRowHtml(ICON_BALL, 'Balls', 'How many balls?', ballPillsHtml(), 'ballPills')}

@@ -73,14 +73,28 @@ function metaItemHtml(iconMarkup, label) {
 // chevron; Range Session is the screen's single filled-accent primary and
 // Course Session the secondary surface, because range practice remains the
 // core loop and Course Mode is an additional path, not a replacement (§4.1).
-function choiceCardHtml({ id, variant, eyebrow, title, description, iconPaths }) {
+// `focusText` is the Active Swing Focus, shown only on the Range card and
+// only when one is set (lesson-spec.md §3.0).
+//
+// It takes the description's line rather than adding one of its own. Home
+// at 393x664 already overflows with a saved plan, so an extra line here
+// would make a measured problem worse — and the description it replaces is
+// generic copy about what a range session is, while the focus is what this
+// particular session is for. Same footprint, more information.
+//
+// It is deliberately NOT separately tappable: Current Focus is context for
+// practice, not a third destination competing with the two session choices.
+// The way to the lesson is History, where lessons live (§5A).
+function choiceCardHtml({ id, variant, eyebrow, title, description, iconPaths, focusText = null }) {
   return `
     <button class="session-choice ${variant}" id="${id}">
       <span class="session-choice-badge">${icon(iconPaths)}</span>
       <span class="session-choice-text">
         <span class="session-choice-eyebrow">${eyebrow}</span>
         <span class="session-choice-title">${title}</span>
-        <span class="session-choice-desc">${description}</span>
+        ${focusText
+          ? `<span class="session-choice-focus"><span class="session-choice-focus-label">Focus</span><span class="session-choice-focus-text">${escapeHtml(focusText)}</span></span>`
+          : `<span class="session-choice-desc">${description}</span>`}
       </span>
       <svg class="session-choice-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_CHEVRON}</svg>
     </button>`;
@@ -232,6 +246,7 @@ export function renderHome(root) {
         title: 'Range Session',
         description: 'Log shots, drills, training aids, and practice goals.',
         iconPaths: ICON_RANGE_BALLS,
+        focusText: db.getActiveSwingFocus()?.cue_text || null,
       })}
       ${choiceCardHtml({
         id: 'courseChoiceBtn',

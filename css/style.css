@@ -77,6 +77,12 @@
   --color-accent-soft: rgba(35, 214, 127, 0.16);
   --color-success: #23d67f;
   --color-warning: #ffb648;
+  /* Instruction, not alarm. It borrows the warning amber because that is
+     the one hue in the palette the accent green does not claim, and a
+     lesson cue must read as distinct from a performance number — but it is
+     its own token so nothing here is ever mistaken for a warning. */
+  --color-focus: #ffb648;
+  --color-focus-soft: rgba(255, 182, 72, 0.14);
   --color-warning-soft: rgba(255, 182, 72, 0.16);
   --color-danger: #ff6a6a;
   --color-danger-soft: rgba(255, 106, 106, 0.15);
@@ -100,6 +106,8 @@
   --color-accent-soft: rgba(14, 156, 98, 0.12);
   --color-success: #0e9c62;
   --color-warning: #b06a00;
+  --color-focus: #b06a00;
+  --color-focus-soft: rgba(176, 106, 0, 0.12);
   --color-warning-soft: rgba(240, 165, 30, 0.16);
   --color-danger: #c23b3b;
   --color-danger-soft: rgba(194, 59, 59, 0.12);
@@ -773,6 +781,32 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 }
 .session-choice.primary .session-choice-desc { opacity: 0.78; }
 .session-choice.secondary .session-choice-desc { color: var(--color-text-secondary); }
+/* The Active Swing Focus on the Range card (lesson-spec.md §3.0). It takes
+   the description's place rather than adding a line, so Home's height is
+   unchanged — the card is exactly as tall with a focus as without one. */
+.session-choice-focus {
+  margin-top: 2px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.session-choice-focus-label {
+  flex-shrink: 0;
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+.session-choice-focus-text {
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .session-choice-chevron { flex-shrink: 0; width: 22px; height: 22px; }
 .session-choice.secondary .session-choice-chevron { color: var(--color-text-tertiary); }
 
@@ -3534,4 +3568,198 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   .hole-map-readout-divider { width: 100%; height: 1px; align-self: stretch; }
   .hole-map-readout-side { align-items: flex-start; }
   .hole-map-distance { font-size: var(--text-display-lg); }
+}
+
+
+/* ---------- Lessons (docs/lesson-spec.md) ---------- */
+
+/* A lightweight header action, not a card and not a floating button (§5A).
+   It sits in the topbar's right slot where .side-space otherwise holds the
+   title centred, so it must stay narrow enough not to shift the title. */
+.topbar-action {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  padding: 8px 0;
+  min-height: var(--tap-min);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.topbar-action:active { opacity: 0.6; }
+
+/* One chip row for all three entity types (§5A.2). Sits outside .scroll so
+   it stays put while the list moves under it. */
+.history-filters {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.history-filters::-webkit-scrollbar { display: none; }
+.filter-chip {
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  padding: 7px 14px;
+  min-height: 34px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.filter-chip.selected {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  font-weight: var(--weight-semibold);
+}
+
+/* A lesson in History. Same card shell as a session and a round; the left
+   edge is what separates it, exactly as the accent edge does for rounds. */
+.lesson-card { border-left: 3px solid var(--color-focus); }
+.lesson-card-cue {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  line-height: var(--leading-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-eyebrow {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+.section-eyebrow:first-child { margin-top: 0; }
+
+.lesson-head { margin-bottom: var(--space-5); }
+.lesson-head-date {
+  font-size: var(--text-title);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.lesson-head-sub { margin-top: 2px; font-size: var(--text-label); color: var(--color-text-secondary); }
+
+.lesson-cues { display: flex; flex-direction: column; gap: var(--space-3); }
+/* One cue per row, the text visually dominant and the action subordinate
+   (§3) — the cue is what the golfer came here to read. */
+.lesson-cue {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border-left: 3px solid transparent;
+  padding: var(--space-4) var(--space-4);
+}
+.lesson-cue.is-focus { border-left-color: var(--color-focus); background: var(--color-focus-soft); }
+.lesson-cue-text {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+.lesson-cue-flag {
+  margin-top: var(--space-2);
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-focus);
+}
+.lesson-cue-set {
+  margin-top: var(--space-2);
+  background: none;
+  border: none;
+  padding: 6px 0;
+  min-height: var(--tap-min);
+  color: var(--color-accent);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.lesson-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.lesson-list-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
+}
+.lesson-list-num {
+  flex-shrink: 0;
+  width: 18px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.lesson-notes {
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+/* Lesson entry. .stack-tight is the field-internal counterpart to .stack —
+   several inputs that belong to one label. */
+.stack-tight { display: flex; flex-direction: column; gap: var(--space-2); }
+.pick-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.pick-chip {
+  background: var(--color-surface-2);
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label);
+  padding: 7px 13px;
+  min-height: 34px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pick-chip:active { background: var(--color-accent-soft); color: var(--color-accent); }
+.link-btn {
+  margin-top: var(--space-2);
+  background: none;
+  border: none;
+  padding: 6px 0;
+  min-height: var(--tap-min);
+  color: var(--color-accent);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The one line V4.2 adds to Session Setup (§5). A line, never a card — it
+   must not push Start Session below the fold. */
+.practice-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--color-focus);
+  min-width: 0;
+}
+.practice-line-label {
+  flex-shrink: 0;
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-focus);
+}
+.practice-line-text {
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

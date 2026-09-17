@@ -210,17 +210,22 @@ function uuid() {
 // below (the same way `goals` was added), so an index written by an older
 // version simply gains the missing arrays on its next read and no data is
 // ever rewritten or migrated in place. Bumped 2 -> 3 when Course Mode's
-// rounds/courses arrived, and 3 -> 4 when courses gained cached GPS
-// geometry and tee sets (§14).
+// rounds/courses arrived, 3 -> 4 when courses gained cached GPS geometry and
+// tee sets (§14), and 4 -> 5 when lessons and the Active Swing Focus
+// arrived (lesson-spec.md §2, §3).
 function defaultIndex() {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     sessions: [],
     goals: [],
     rounds: [],
     courses: [],
     practice_plans: [],
-    settings: { lastClub: null, lastSetup: 'ground', lastSurface: 'mat', lastSwing: 'full', lastBallCount: DEFAULT_BALL_COUNT, lastKnownLocation: null, theme: 'dark' },
+    lessons: [],
+    // active_swing_focus is a POINTER at a lesson's cue, not a copy of it —
+    // see setActiveSwingFocus. Null when no focus is set, which is the
+    // state every install starts in and the state a golfer can return to.
+    settings: { lastClub: null, lastSetup: 'ground', lastSurface: 'mat', lastSwing: 'full', lastBallCount: DEFAULT_BALL_COUNT, lastKnownLocation: null, theme: 'dark', active_swing_focus: null },
   };
 }
 
@@ -240,7 +245,20 @@ function loadIndex() {
     if (!Array.isArray(_index.rounds)) _index.rounds = [];
     if (!Array.isArray(_index.courses)) _index.courses = [];
     if (!Array.isArray(_index.practice_plans)) _index.practice_plans = [];
+    // Plans written before lessons existed have no `source` — every one of
+    // them came from a round, which is exactly what the absent field means.
+    // Normalized on load rather than migrated in place, like everything
+    // else here, so a backup restored tomorrow gets the same treatment.
+    for (const p of _index.practice_plans) {
+      if (!p.source) p.source = 'round';
+      if (p.lesson_id === undefined) p.lesson_id = null;
+      if (p.round_id === undefined) p.round_id = null;
+    }
+    // Lessons arrive the same way every other collection did — an index
+    // written before V4.2 simply gains the key on its next read.
+    if (!Array.isArray(_index.lessons)) _index.lessons = [];
     if (!_index.settings || typeof _index.settings !== 'object') _index.settings = {};
+    if (_index.settings.active_swing_focus === undefined) _index.settings.active_swing_focus = null;
   } catch (e) {
     console.error('Next Ball: failed to load local data, starting fresh', e);
     _index = defaultIndex();
@@ -352,6 +370,7 @@ export function getDB() {
     courses: index.courses,
     holes,
     practice_plans: index.practice_plans,
+    lessons: index.lessons,
     settings: index.settings,
   };
 }
@@ -426,6 +445,14 @@ export function createSession(fields) {
     // Optional, off by default — set via the Active screen's Target chip.
     // While set, it's stamped onto every new shot just like club/setup/drill.
     current_target_distance: null,
+    // The Active Swing Focus as it stood when this session was played — a
+    // COPY, never a pointer (lesson-spec.md §5.2). Correcting a lesson's
+    // wording three weeks from now must not silently re-label the sessions
+    // already practised under the old wording. Null when no focus was set.
+    //
+    // Written even though nothing reads it yet: it costs nothing now, and
+    // it is the one field here that cannot be backfilled later.
+    swing_focus: fields.swing_focus !== undefined ? fields.swing_focus : swingFocusSnapshot(),
     practice_focus: fields.practice_focus ?? [],
     session_notes: fields.session_notes ?? '',
     // End-of-session check-in — optional, filled in (or skipped) on the
@@ -1488,6 +1515,316 @@ export function recordCoursePlayed(courseId, { hole_count, hole_defs } = {}) {
   return course;
 }
 
+
+// ----- Lessons (docs/lesson-spec.md §2) -----
+//
+// A record of formal instruction, and the only place in the app whose text
+// the app is forbidden to touch. §2.2: cue and note text is stored and shown
+// exactly as entered — never summarised, rephrased, corrected or expanded.
+// A coach's phrasing carries meaning the app cannot see, so it is verbatim
+// or absent. Nothing here trims case, fixes grammar or expands shorthand;
+// the only normalisation is whitespace at the ends, which is typing noise
+// rather than phrasing.
+
+// §2.1: the cap is the feature, not a guardrail. A lesson that accepts ten
+// cues becomes a journal, and a journal is not carried onto a range mat.
+export const MAX_LESSON_CUES = 3;
+
+export const LESSON_STATUSES = ['active', 'archived'];
+
+function cleanText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+// Cues and drills share a shape deliberately: both are short ordered lines
+// of the instructor's own words, and one editor serves both. `order` is
+// 1-based and reassigned on every write so it always matches position —
+// the Active Swing Focus points at a cue by order, so a gap would break it.
+function normalizeOrderedText(list, { max = Infinity } = {}) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((item) => (typeof item === 'string' ? { text: item } : item))
+    .map((item) => cleanText(item?.text))
+    .filter((text) => text.length > 0)
+    .slice(0, max)
+    .map((text, i) => ({ order: i + 1, text }));
+}
+
+// Drills carry no cap. The three-cue limit exists because a golfer cannot
+// hold more than one swing thought on the mat; drills are what they DO,
+// closer to a plan's steps than to a cue, and a lesson may legitimately
+// come with several.
+export function normalizeLessonCues(cues) {
+  return normalizeOrderedText(cues, { max: MAX_LESSON_CUES });
+}
+
+export function normalizeLessonDrills(drills) {
+  return normalizeOrderedText(drills);
+}
+
+// §2.1: nothing is required except a date and one cue. A one-cue lesson is
+// a complete lesson, and the model says so by refusing everything else.
+export function createLesson(fields = {}) {
+  const index = loadIndex();
+  const cues = normalizeLessonCues(fields.cues);
+  const date = cleanText(fields.date);
+  if (!date || !cues.length) return null;
+
+  const ts = nowISO();
+  const lesson = {
+    lesson_id: uuid(),
+    // The lesson date, not the entry date — a golfer typing this up on the
+    // drive home is recording something that already happened.
+    date,
+    instructor_name: cleanText(fields.instructor_name) || null,
+    // Venue fields match a session's, so the same resolution and display
+    // helpers work on both rather than a second location shape existing.
+    location_name: cleanText(fields.location_name) || null,
+    location_city: cleanText(fields.location_city) || null,
+    location_state: cleanText(fields.location_state) || null,
+    location_place_id: fields.location_place_id || null,
+    topics: Array.isArray(fields.topics) ? fields.topics.map(cleanText).filter(Boolean) : [],
+    cues,
+    drills: normalizeLessonDrills(fields.drills),
+    notes: typeof fields.notes === 'string' ? fields.notes.trim() : '',
+    // §7: empty until video ships. Present from the first record so phase
+    // two adds no field to existing lessons.
+    video_ids: [],
+    status: LESSON_STATUSES.includes(fields.status) ? fields.status : 'active',
+    data_source: fields.data_source === 'test' ? 'test' : 'real',
+    created_at: ts,
+    updated_at: ts,
+  };
+  index.lessons.push(lesson);
+  saveIndex();
+  return lesson;
+}
+
+export function getLesson(lessonId) {
+  return loadIndex().lessons.find((l) => l.lesson_id === lessonId) || null;
+}
+
+// Newest lesson first, by the lesson's own date and then by entry order, so
+// two lessons on one day stay in the order they were recorded.
+export function listLessons() {
+  return loadIndex().lessons.slice().sort((a, b) => {
+    const byDate = String(b.date).localeCompare(String(a.date));
+    return byDate !== 0 ? byDate : String(b.created_at).localeCompare(String(a.created_at));
+  });
+}
+
+// §2.3: every field is editable, created_at is preserved, updated_at tracks
+// the edit, and editing is not versioned — the current text is the text.
+//
+// Editing deliberately does NOT reach into anything downstream. Past
+// sessions hold their own snapshot (§5.2) and plans hold their own copy of
+// the text (§4.4), so a correction here changes the present and nothing
+// else. The Active Swing Focus follows, because it is a pointer — that is
+// a correction to the present, not to the past.
+export function updateLesson(lessonId, patch = {}) {
+  const lesson = getLesson(lessonId);
+  if (!lesson) return null;
+
+  if (patch.date !== undefined) {
+    const date = cleanText(patch.date);
+    if (date) lesson.date = date;
+  }
+  if (patch.instructor_name !== undefined) lesson.instructor_name = cleanText(patch.instructor_name) || null;
+  if (patch.location_name !== undefined) lesson.location_name = cleanText(patch.location_name) || null;
+  if (patch.location_city !== undefined) lesson.location_city = cleanText(patch.location_city) || null;
+  if (patch.location_state !== undefined) lesson.location_state = cleanText(patch.location_state) || null;
+  if (patch.location_place_id !== undefined) lesson.location_place_id = patch.location_place_id || null;
+  if (patch.topics !== undefined) {
+    lesson.topics = Array.isArray(patch.topics) ? patch.topics.map(cleanText).filter(Boolean) : [];
+  }
+  if (patch.cues !== undefined) {
+    const cues = normalizeLessonCues(patch.cues);
+    // A lesson with no cues is not a lesson (§2.1), so an edit that would
+    // empty them is refused rather than applied — the golfer keeps what
+    // they had instead of losing the record to a mistake.
+    if (cues.length) lesson.cues = cues;
+  }
+  if (patch.drills !== undefined) lesson.drills = normalizeLessonDrills(patch.drills);
+  if (patch.notes !== undefined) lesson.notes = typeof patch.notes === 'string' ? patch.notes.trim() : '';
+  if (patch.status !== undefined && LESSON_STATUSES.includes(patch.status)) lesson.status = patch.status;
+
+  lesson.updated_at = nowISO();
+  saveIndex();
+
+  // If the focus pointed at a cue that no longer exists — the golfer
+  // deleted the third cue while it was the focus — fall back to the first
+  // rather than leaving a pointer into nothing.
+  reconcileActiveSwingFocus();
+  return lesson;
+}
+
+// §2.4: offered on the next lesson, using the same deterministic
+// frequency-plus-recency shape as club quick picks (ux-spec.md §3.7). Test
+// lessons never influence it, exactly as test sessions never influence
+// club picks.
+export function recentInstructorNames(limit = 3) {
+  const counts = new Map();
+  for (const l of loadIndex().lessons) {
+    if (sessionDataSource(l) === 'test') continue;
+    const name = cleanText(l.instructor_name);
+    if (!name) continue;
+    const prev = counts.get(name) || { name, count: 0, last: '' };
+    prev.count += 1;
+    if (String(l.date) > prev.last) prev.last = String(l.date);
+    counts.set(name, prev);
+  }
+  return [...counts.values()]
+    .sort((a, b) => (b.count - a.count) || String(b.last).localeCompare(String(a.last)))
+    .slice(0, limit)
+    .map((e) => e.name);
+}
+
+// Removing a lesson takes the artifacts that cannot outlive it: the Active
+// Swing Focus if it pointed here, and any practice plan this lesson
+// produced — the same rule deleteRound() applies to a round's plans, for
+// the same reason. A plan whose source is gone could not explain itself.
+//
+// Past SESSIONS are deliberately untouched: they hold a snapshot, not a
+// reference, so a session practised under this lesson keeps its cue text
+// and stays truthful after the lesson is gone (§5.2).
+export function deleteLesson(lessonId) {
+  const index = loadIndex();
+  const idx = index.lessons.findIndex((l) => l.lesson_id === lessonId);
+  if (idx === -1) return null;
+
+  const removedLesson = index.lessons[idx];
+  const removedPlans = index.practice_plans.filter((p) => p.lesson_id === lessonId);
+  const focus = index.settings.active_swing_focus;
+  const removedFocus = focus && focus.lesson_id === lessonId ? { ...focus } : null;
+
+  index.lessons.splice(idx, 1);
+  if (removedPlans.length) {
+    index.practice_plans = index.practice_plans.filter((p) => p.lesson_id !== lessonId);
+  }
+  if (removedFocus) index.settings.active_swing_focus = null;
+
+  if (!saveIndex()) {
+    index.lessons.splice(idx, 0, removedLesson);
+    if (removedPlans.length) index.practice_plans.push(...removedPlans);
+    if (removedFocus) index.settings.active_swing_focus = removedFocus;
+    throw Object.assign(new Error('Failed to delete lesson'), { code: 'storage_error' });
+  }
+  return { lesson: removedLesson, plans: removedPlans, focus: removedFocus };
+}
+
+// The counterpart to deleteLesson, for a brief Undo window — same contract
+// as restoreRound(): it trusts the caller to pass back exactly what was
+// removed, and returns false rather than throwing.
+export function restoreLesson(lesson, plans = [], focus = null) {
+  const index = loadIndex();
+  if (!lesson || index.lessons.some((l) => l.lesson_id === lesson.lesson_id)) return false;
+
+  index.lessons.push(lesson);
+  for (const p of plans) {
+    if (!index.practice_plans.some((x) => x.plan_id === p.plan_id)) index.practice_plans.push(p);
+  }
+  // Only restored if the golfer has not set a different focus meanwhile —
+  // undoing a delete must not yank away a focus they chose since.
+  if (focus && !index.settings.active_swing_focus) index.settings.active_swing_focus = focus;
+  return saveIndex();
+}
+
+// ----- Active Swing Focus (docs/lesson-spec.md §3) -----
+//
+// One focus, app-wide, at a time. Stored as a POINTER — {lesson_id,
+// cue_order} — so that correcting a lesson's wording corrects the focus
+// too. Everything that records history stores a COPY instead (see
+// createSession's swing_focus), which is what keeps a correction to the
+// present from rewriting the past.
+//
+// It never expires. A golfer who has not practised in a month still has the
+// same swing thought, and §9.7 forbids the app clearing the instructor's
+// guidance on its own initiative. Only a newer lesson's focus or an
+// explicit clear replaces it.
+
+export function setActiveSwingFocus(lessonId, cueOrder = 1) {
+  const lesson = getLesson(lessonId);
+  if (!lesson) return null;
+  const cue = lesson.cues.find((c) => c.order === cueOrder) || lesson.cues[0];
+  if (!cue) return null;
+
+  const index = loadIndex();
+  index.settings.active_swing_focus = {
+    lesson_id: lesson.lesson_id,
+    cue_order: cue.order,
+    set_at: nowISO(),
+  };
+  saveIndex();
+  return getActiveSwingFocus();
+}
+
+// Resolves the pointer against the CURRENT lesson, so an edited cue is
+// reflected immediately. Returns null when nothing is set, and self-heals
+// when the lesson behind it has gone.
+export function getActiveSwingFocus() {
+  const focus = loadIndex().settings.active_swing_focus;
+  if (!focus) return null;
+  const lesson = getLesson(focus.lesson_id);
+  if (!lesson) { clearActiveSwingFocus(); return null; }
+  const cue = lesson.cues.find((c) => c.order === focus.cue_order) || lesson.cues[0];
+  if (!cue) { clearActiveSwingFocus(); return null; }
+  return {
+    lesson_id: lesson.lesson_id,
+    cue_order: cue.order,
+    cue_text: cue.text,
+    instructor_name: lesson.instructor_name,
+    lesson_date: lesson.date,
+    set_at: focus.set_at,
+    // The other cues from the same lesson. Never shown on Home (§3) — the
+    // point of the feature is to carry ONE swing thought — but the Lesson
+    // Summary shows them, one deliberate tap away.
+    supporting_cues: lesson.cues.filter((c) => c.order !== cue.order),
+  };
+}
+
+// §11.2, decided: the golfer can always clear it; the app never does on its
+// own. Clearing does not touch the lesson.
+export function clearActiveSwingFocus() {
+  const index = loadIndex();
+  if (!index.settings.active_swing_focus) return null;
+  index.settings.active_swing_focus = null;
+  saveIndex();
+  return null;
+}
+
+// Keeps the pointer valid after an edit removed the cue it named. Silent by
+// design: falling back to the lesson's first cue is closer to the golfer's
+// intent than clearing their focus because they deleted a line.
+function reconcileActiveSwingFocus() {
+  const index = loadIndex();
+  const focus = index.settings.active_swing_focus;
+  if (!focus) return;
+  const lesson = getLesson(focus.lesson_id);
+  if (!lesson || !lesson.cues.length) { index.settings.active_swing_focus = null; saveIndex(); return; }
+  if (!lesson.cues.some((c) => c.order === focus.cue_order)) {
+    focus.cue_order = lesson.cues[0].order;
+    saveIndex();
+  }
+}
+
+// The snapshot a session stores at creation (§5.2). A copy, never a
+// reference: an earlier draft of the spec stored an id, under which
+// correcting a typo three weeks later would silently re-label every past
+// session that pointed at it. Editing a lesson is a routine action, so a
+// reference is a latent data-integrity bug rather than a shortcut.
+export function swingFocusSnapshot() {
+  const focus = getActiveSwingFocus();
+  if (!focus) return null;
+  return {
+    lesson_id: focus.lesson_id,   // provenance and linking only
+    cue_order: focus.cue_order,
+    cue_text: focus.cue_text,     // the wording AS PRACTISED
+    instructor_name: focus.instructor_name,
+    lesson_date: focus.lesson_date,
+    captured_at: nowISO(),
+  };
+}
+
 // ----- Rounds -----
 
 export function createRound(fields = {}) {
@@ -1823,7 +2160,18 @@ export function getPlans() {
 // back to storage order, since two plans saved in the same millisecond carry
 // identical created_at values.
 export function getPlanForRound(roundId) {
+  if (!roundId) return null;
   const mine = loadPlans().filter((p) => p.round_id === roundId);
+  if (!mine.length) return null;
+  return mine.find((p) => p.status === 'saved' || p.status === 'started')
+    || mine.reduce((latest, p) => (p.created_at >= latest.created_at ? p : latest));
+}
+
+// The lesson counterpart to getPlanForRound, with identical tie-breaking —
+// outstanding first, then the most recent concluded plan.
+export function getPlanForLesson(lessonId) {
+  if (!lessonId) return null;
+  const mine = loadPlans().filter((p) => p.lesson_id === lessonId);
   if (!mine.length) return null;
   return mine.find((p) => p.status === 'saved' || p.status === 'started')
     || mine.reduce((latest, p) => (p.created_at >= latest.created_at ? p : latest));
@@ -1856,15 +2204,41 @@ export function getPlanForSession(sessionId) {
 // saving is a single user action with a single call site and the
 // one-outstanding-plan invariant (§7.3) should not depend on every future
 // caller remembering to resolve the previous one first.
-export function createPlan(roundId, focus) {
-  if (!roundId || !focus) return null;
+// A plan's origin (lesson-spec.md §4.1). A round-derived plan and a
+// lesson-derived plan are the same object with a different source: save,
+// supersede, dismiss, start-as-range-session, the Home row and the
+// one-outstanding-plan rule are all identical, so they share one type
+// rather than forking into two that would duplicate every one of those.
+export const PLAN_SOURCES = ['round', 'lesson'];
+
+// Accepts either a round id — the original signature, which every existing
+// caller still uses — or {source, roundId, lessonId}.
+function normalizePlanOrigin(origin) {
+  if (typeof origin === 'string') return origin ? { source: 'round', round_id: origin, lesson_id: null } : null;
+  if (!origin || typeof origin !== 'object') return null;
+  const source = PLAN_SOURCES.includes(origin.source) ? origin.source : (origin.lessonId ? 'lesson' : 'round');
+  const round_id = origin.roundId ?? origin.round_id ?? null;
+  const lesson_id = origin.lessonId ?? origin.lesson_id ?? null;
+  // A plan always names its source. §7.3 used to say round_id is never
+  // null; with two possible origins the invariant moves up a level, but it
+  // is no weaker — a plan that could not explain where it came from is
+  // still refused here.
+  if (source === 'round' && !round_id) return null;
+  if (source === 'lesson' && !lesson_id) return null;
+  return { source, round_id: source === 'round' ? round_id : null, lesson_id: source === 'lesson' ? lesson_id : null };
+}
+
+export function createPlan(origin, focus) {
+  const from = normalizePlanOrigin(origin);
+  if (!from || !focus) return null;
   const plans = loadPlans();
   const ts = nowISO();
 
   const record = {
     plan_id: uuid(),
-    // Never null — a plan without its source round could not explain itself.
-    round_id: roundId,
+    source: from.source,
+    round_id: from.round_id,
+    lesson_id: from.lesson_id,
     created_at: ts,
     resolved_at: null,
     status: 'saved',
@@ -1978,6 +2352,9 @@ export function importFullDB(obj) {
     rounds: Array.isArray(obj.rounds) ? obj.rounds : [],
     courses: Array.isArray(obj.courses) ? obj.courses : [],
     practice_plans: Array.isArray(obj.practice_plans) ? obj.practice_plans : [],
+    // Pre-V4.2 backups have no `lessons` key. Same treatment as every
+    // collection added before it: absent means empty, not corrupt.
+    lessons: Array.isArray(obj.lessons) ? obj.lessons : [],
     // Merged (not `obj.settings || defaultIndex().settings`) so an empty or
     // partial settings object — e.g. Settings' "Erase All Data" passing
     // `{}` deliberately — still ends up with every default field rather

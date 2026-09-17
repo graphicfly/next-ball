@@ -1,6 +1,7 @@
 import * as db from '../db.js';
 import { qs, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
 import { practiceFocus, isRangePracticable } from '../roundAnalysis.js';
+import { lessonPracticeFocus } from '../lessonPlan.js';
 import { setPendingPlanId } from '../state.js';
 
 // Next Practice — docs/course-mode-spec.md §4.6, Reference E.
@@ -18,15 +19,52 @@ import { setPendingPlanId } from '../state.js';
 
 const ICON_TARGET = '<circle cx="12" cy="12" r="8.2" /><circle cx="12" cy="12" r="4.6" /><circle cx="12" cy="12" r="1.1" fill="currentColor" />';
 
-export function renderPracticePlan(root, roundId) {
-  const round = db.getRound(roundId);
-  if (!round) { location.hash = '#/history'; return; }
+// One screen, both origins (lesson-spec.md §4.1): a lesson-derived plan and
+// a round-derived plan are the same object with a different source, and
+// everything below — save, supersede, dismiss, start-as-range-session — is
+// identical. Forking this screen would have duplicated all of it.
+//
+// `source` is either a round id (the original signature, still used by
+// #/course/plan/:id) or { source: 'lesson', id }.
+function resolveSource(source) {
+  if (typeof source === 'string' || !source) {
+    const round = db.getRound(source);
+    return round ? {
+      kind: 'round',
+      id: source,
+      saved: db.getPlanForRound(source),
+      generate: () => practiceFocus(round, db.getHolesForRound(source)),
+      origin: source,
+      back: `#/course/summary/${source}`,
+      provenance: 'Created from your last round',
+      eyebrow: 'Focus for next time',
+    } : null;
+  }
+  const lesson = db.getLesson(source.id);
+  return lesson ? {
+    kind: 'lesson',
+    id: source.id,
+    saved: db.getPlanForLesson(source.id),
+    generate: () => lessonPracticeFocus(lesson, { cueOrder: db.getActiveSwingFocus()?.lesson_id === lesson.lesson_id ? db.getActiveSwingFocus().cue_order : 1 }),
+    origin: { source: 'lesson', lessonId: source.id },
+    back: `#/lesson/${source.id}`,
+    provenance: lesson.instructor_name ? `From your lesson with ${lesson.instructor_name}` : 'From your lesson',
+    // "Focus for next time" is a round's phrasing — it points at the next
+    // session after the one just played. A lesson plan is for the practice
+    // the golfer is arranging right now.
+    eyebrow: 'Focus for practice',
+  } : null;
+}
 
-  // A round's plan is created once. Re-opening this screen shows the plan
+export function renderPracticePlan(root, source) {
+  const src = resolveSource(source);
+  if (!src) { location.hash = '#/history'; return; }
+
+  // A source's plan is created once. Re-opening this screen shows the plan
   // that was saved rather than regenerating (and re-saving) a second one.
-  const saved = db.getPlanForRound(roundId);
-  const plan = saved || practiceFocus(round, db.getHolesForRound(roundId));
-  if (!plan) { location.hash = `#/course/summary/${roundId}`; return; }
+  const saved = src.saved;
+  const plan = saved || src.generate();
+  if (!plan) { location.hash = src.back; return; }
 
   const title = saved ? saved.focus_title : plan.focus_title;
   const rationale = saved ? saved.focus_rationale : plan.focus_rationale;
@@ -53,9 +91,9 @@ export function renderPracticePlan(root, roundId) {
 
       <div class="scroll">
         <div class="focus-block">
-          <div class="focus-eyebrow">Focus for next time</div>
+          <div class="focus-eyebrow">${escapeHtml(src.eyebrow)}</div>
           <div class="focus-title">${escapeHtml(title)}</div>
-          ${isSaved ? '<div class="focus-provenance">Created from your last round</div>' : ''}
+          ${isSaved ? `<div class="focus-provenance">${escapeHtml(src.provenance)}</div>` : ''}
           <div class="focus-rationale">${escapeHtml(rationale)}</div>
           <div class="focus-goal">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">${ICON_TARGET}</svg>
@@ -89,7 +127,7 @@ export function renderPracticePlan(root, roundId) {
     </div>
   `;
 
-  qs('#backBtn', root).addEventListener('click', () => { location.hash = `#/course/summary/${roundId}`; });
+  qs('#backBtn', root).addEventListener('click', () => { location.hash = src.back; });
 
   // Done dismisses without saving and returns — it never starts practice.
   qs('#doneBtn', root)?.addEventListener('click', () => { location.hash = '#/home'; });
@@ -101,15 +139,15 @@ export function renderPracticePlan(root, roundId) {
     location.hash = '#/start';
   });
 
-  qs('#deletePlanBtn', root)?.addEventListener('click', () => openDeletePlanSheet(root, saved, roundId));
+  qs('#deletePlanBtn', root)?.addEventListener('click', () => openDeletePlanSheet(root, saved));
 
   qs('#savePlanBtn', root)?.addEventListener('click', () => {
-    const record = db.createPlan(roundId, plan);
+    const record = db.createPlan(src.origin, plan);
     if (!record) { toast('Could not save this plan'); return; }
     toast('Practice plan saved');
     // Re-render into the saved state so the confirmation is visible and the
     // plan cannot be saved twice.
-    renderPracticePlan(root, roundId);
+    renderPracticePlan(root, source);
   });
 }
 
@@ -117,13 +155,13 @@ export function renderPracticePlan(root, roundId) {
 // record stays attached to its round for provenance but stops being
 // outstanding, so it disappears from Home and from Range Session entry
 // (§7.11). Nothing about the round itself changes.
-function openDeletePlanSheet(root, plan, roundId) {
+function openDeletePlanSheet(root, plan) {
   const backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
   backdrop.innerHTML = `
     <div class="sheet sheet-danger" role="dialog" aria-modal="true" aria-labelledby="deletePlanTitle">
       <h2 id="deletePlanTitle">Delete the saved plan &ldquo;${escapeHtml(plan.focus_title)}&rdquo;?</h2>
-      <p class="tiny muted" style="margin-bottom:var(--space-4);">Your round and its summary are not affected.</p>
+      <p class="tiny muted" style="margin-bottom:var(--space-4);">${plan.source === 'lesson' ? 'Your lesson is not affected.' : 'Your round and its summary are not affected.'}</p>
       <div class="stack">
         <button class="btn btn-outline" id="cancelDeletePlanBtn">Cancel</button>
         <button class="btn btn-danger" id="confirmDeletePlanBtn">Delete plan</button>

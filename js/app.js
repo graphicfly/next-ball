@@ -15,6 +15,8 @@ import { renderHoleMap } from './screens/holeMap.js';
 import { renderRoundSummary } from './screens/roundSummary.js';
 import { renderRoundExplore } from './screens/roundExplore.js';
 import { renderPracticePlan } from './screens/practicePlan.js';
+import { renderLessonEntry } from './screens/lessonEntry.js';
+import { renderLessonSummary } from './screens/lessonSummary.js';
 import { renderTrends } from './screens/trends.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getSettings } from './db.js';
@@ -50,6 +52,13 @@ const routes = [
   { pattern: /^#\/course\/summary\/([^/]+)$/, render: (m) => renderRoundSummary(root, m[1]) },
   { pattern: /^#\/course\/explore\/([^/]+)$/, render: (m) => renderRoundExplore(root, m[1]) },
   { pattern: /^#\/course\/plan\/([^/]+)$/, render: (m) => renderPracticePlan(root, m[1]) },
+  // Lessons (docs/lesson-spec.md §5A). History owns them, so none of these
+  // is a nav route either — global navigation stays exactly
+  // Home | History | Trends | Settings (§5A.3).
+  { pattern: /^#\/lesson\/new$/, render: () => renderLessonEntry(root) },
+  { pattern: /^#\/lesson\/edit\/([^/]+)$/, render: (m) => renderLessonEntry(root, m[1]) },
+  { pattern: /^#\/lesson\/plan\/([^/]+)$/, render: (m) => renderPracticePlan(root, { source: 'lesson', id: m[1] }) },
+  { pattern: /^#\/lesson\/([^/]+)$/, render: (m) => renderLessonSummary(root, m[1]) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];
