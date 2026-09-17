@@ -1,0 +1,17 @@
+# GitHub Pages serves this repository directly from `main`, so every file
+# committed here is fetchable at nextballgolf.com unless Jekyll is told to
+# leave it out of the built site. Product specs and the roadmap were readable
+# at https://nextballgolf.com/docs/*.md — including releases not yet shipped.
+#
+# `exclude` keeps these out of the published site. It does NOT make the
+# GitHub repository private; that is a separate decision.
+#
+# NOT `.nojekyll`: that file DISABLES Jekyll and serves the repository
+# verbatim, which is the opposite of what is wanted here.
+#
+# Anything the app loads at runtime must stay OUT of this list — index.html,
+# js/, css/, icons/, graphics/, vendor/, manifest.json, service-worker.js.
+exclude:
+  - docs/
+  - test/
+  - PRODUCT_GUIDE.md
