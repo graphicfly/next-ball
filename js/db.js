@@ -210,10 +210,11 @@ function uuid() {
 // below (the same way `goals` was added), so an index written by an older
 // version simply gains the missing arrays on its next read and no data is
 // ever rewritten or migrated in place. Bumped 2 -> 3 when Course Mode's
-// rounds/courses arrived.
+// rounds/courses arrived, and 3 -> 4 when courses gained cached GPS
+// geometry and tee sets (§14).
 function defaultIndex() {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     sessions: [],
     goals: [],
     rounds: [],
@@ -1199,6 +1200,106 @@ export function isProviderBackedCourse(course) {
 
 export function getCourse(courseId) {
   return loadIndex().courses.find((c) => c.course_id === courseId) || null;
+}
+
+// ----- Cached course geometry (docs/course-mode-spec.md §14) -----
+//
+// Course geometry is fetched from Overpass once and cached permanently on
+// the course record. Greens and tees do not move, the service is
+// unreliable under load (§14.12.1), and a golfer standing on the first tee
+// must never wait on a network call — so a course is looked up at most once
+// and every later round reads this.
+//
+// Stored coordinates use `{ lat, lon }` throughout, unlike the course's own
+// single `latitude`/`longitude` venue point: a green is a 20-50 vertex ring
+// and the long key names roughly double what that costs in localStorage.
+
+// Normalize-on-load for a single course, same idiom as loadIndex()'s arrays:
+// a course saved before §14 simply gains these keys on read rather than
+// through a migration.
+function normalizeCourseGeometry(course) {
+  if (!course) return course;
+  if (course.geometry === undefined) course.geometry = null;
+  if (!Array.isArray(course.tees)) course.tees = [];
+  if (course.selected_tee_id === undefined) course.selected_tee_id = null;
+  // A lookup that found nothing is worth remembering too — otherwise every
+  // visit to an unmapped course re-queries a service that already answered.
+  if (course.geometry_checked_at === undefined) course.geometry_checked_at = null;
+  return course;
+}
+
+export function getCourseGeometry(courseId) {
+  const course = getCourse(courseId);
+  if (!course) return null;
+  return normalizeCourseGeometry(course).geometry;
+}
+
+// Records the result of a geometry lookup. `geometry` may be null, which is
+// the honest record of "we asked and this course has no mapping" — that is
+// half of all courses (§14.12.1) and must not trigger a re-fetch every time.
+// Pass `tees` (from teeSetsFromGeometry) to publish measured tee sets.
+export function setCourseGeometry(courseId, geometry, tees = null) {
+  const course = getCourse(courseId);
+  if (!course) return null;
+  normalizeCourseGeometry(course);
+
+  course.geometry = geometry || null;
+  course.geometry_checked_at = nowISO();
+  if (Array.isArray(tees)) {
+    course.tees = tees;
+    // First measured tee set becomes the default, shortest first — §14.3's
+    // "first visit defaults to the course's shortest published tee, which is
+    // the safest assumption and always changeable."
+    if (!course.selected_tee_id && tees.length) {
+      course.selected_tee_id = tees.reduce((a, b) => (b.total_yards < a.total_yards ? b : a)).tee_id;
+    }
+  }
+  course.updated_at = nowISO();
+  saveIndex();
+  return course;
+}
+
+// Whether this course has already been asked about, so a caller can skip a
+// repeat lookup. Separate from "has geometry" precisely because a negative
+// answer is still an answer.
+export function courseGeometryChecked(courseId) {
+  const course = getCourse(courseId);
+  return !!course && !!normalizeCourseGeometry(course).geometry_checked_at;
+}
+
+export function getCourseTees(courseId) {
+  const course = getCourse(courseId);
+  return course ? normalizeCourseGeometry(course).tees : [];
+}
+
+// §14.3: the most recently selected tee for a course is remembered and
+// pre-selected on return. Rejects an unknown id rather than storing a
+// dangling reference.
+export function setSelectedTee(courseId, teeId) {
+  const course = getCourse(courseId);
+  if (!course) return null;
+  normalizeCourseGeometry(course);
+  if (teeId !== null && !course.tees.some((t) => t.tee_id === teeId)) return course;
+  course.selected_tee_id = teeId;
+  course.updated_at = nowISO();
+  saveIndex();
+  return course;
+}
+
+export function getSelectedTee(courseId) {
+  const course = getCourse(courseId);
+  if (!course) return null;
+  normalizeCourseGeometry(course);
+  return course.tees.find((t) => t.tee_id === course.selected_tee_id) || null;
+}
+
+// The green a hole can measure to, from either source. Provider geometry and
+// a green the golfer captured are deliberately distinguishable by `source`
+// (§14.13.5) — never present a captured point as surveyed data.
+export function getGreenForHole(courseId, holeNumber) {
+  const geometry = getCourseGeometry(courseId);
+  const hole = geometry?.holes?.find((h) => h.hole_number === holeNumber);
+  return hole?.green || null;
 }
 
 export function findCourseByPlaceId(placeId) {
