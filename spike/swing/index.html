@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Swing Lab Spike</title>
+<meta name="robots" content="noindex, nofollow" />
+<style>
+  :root {
+    --bg:#0b0d10; --surface:#14181d; --surface2:#1b2026; --line:#262d35;
+    --text:#f5f7f8; --dim:#9aa5b1; --accent:#23d67f; --warn:#ffb648; --bad:#ff5c5c;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing:border-box; -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         padding:16px; padding-bottom:64px; }
+  h1 { font-size:19px; margin:0 0 2px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:16px; }
+  .warn-banner { background:rgba(255,182,72,.12); border-left:3px solid var(--warn);
+                 padding:10px 12px; border-radius:8px; font-size:13px; margin-bottom:16px; }
+  section { background:var(--surface); border-radius:12px; padding:14px; margin-bottom:12px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim);
+       margin:0 0 10px; font-weight:600; }
+  button { background:var(--accent); color:#06281a; border:0; border-radius:10px;
+           padding:11px 14px; font-size:15px; font-weight:600; min-height:48px;
+           cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  button.sec { background:var(--surface2); color:var(--text); }
+  button:disabled { opacity:.4; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  label.file { display:inline-block; }
+  input[type=file] { display:none; }
+  select { background:var(--surface2); color:var(--text); border:1px solid var(--line);
+           border-radius:8px; padding:9px; font-size:15px; min-height:44px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td { padding:5px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  td:first-child { color:var(--dim); width:44%; padding-right:10px; }
+  td.v { font-family:var(--mono); word-break:break-all; }
+  .ok { color:var(--accent); } .bad { color:var(--bad); } .wr { color:var(--warn); }
+  video { width:100%; border-radius:10px; background:#000; margin-top:10px; }
+  canvas { width:100%; border-radius:10px; background:#000; margin-top:10px; }
+  pre { background:#080a0c; border:1px solid var(--line); border-radius:8px; padding:10px;
+        font-family:var(--mono); font-size:11px; overflow:auto; max-height:320px; white-space:pre-wrap; }
+  .bar { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; margin-top:8px; }
+  .bar > i { display:block; height:100%; background:var(--accent); width:0; transition:width .15s; }
+  .log { font-family:var(--mono); font-size:11px; color:var(--dim); max-height:160px; overflow:auto; }
+</style>
+</head>
+<body>
+
+<h1>Swing Lab — technical spike</h1>
+<div class="sub">Feasibility prototype. Not part of the Next Ball app.</div>
+
+<div class="warn-banner">
+  Isolated by design: this page shares no code, storage or navigation with Next Ball.
+  It writes only to its own IndexedDB database (<code>nextball_spike_media</code>) and
+  never touches <code>localStorage</code>.
+</div>
+
+<section>
+  <h2>1 · Environment</h2>
+  <table id="envTable"></table>
+</section>
+
+<section>
+  <h2>2 · Import a swing</h2>
+  <div class="row">
+    <label class="file"><button class="sec" onclick="document.getElementById('pick').click()">Choose video</button></label>
+    <input type="file" id="pick" accept="video/*" />
+  </div>
+  <div class="sub" style="margin:8px 0 0">On iPhone this offers the photo library and the camera. Record with the normal Camera app first — slo-mo if you have it.</div>
+  <table id="metaTable"></table>
+</section>
+
+<section>
+  <h2>3 · Local storage</h2>
+  <div class="row">
+    <button class="sec" id="saveBtn" disabled>Save to IndexedDB</button>
+    <button class="sec" id="loadBtn" disabled>Reload from store</button>
+    <button class="sec" id="delBtn" disabled>Delete</button>
+    <button class="sec" id="persistBtn">Request persistence</button>
+  </div>
+  <table id="storeTable"></table>
+  <video id="player" playsinline controls></video>
+</section>
+
+<section>
+  <h2>4 · Frame access</h2>
+  <div class="row">
+    <select id="rateSel">
+      <option value="1">playback 1×</option>
+      <option value="0.5">playback 0.5×</option>
+      <option value="0.25" selected>playback 0.25×</option>
+      <option value="0.1">playback 0.1×</option>
+    </select>
+    <button class="sec" id="framesBtn" disabled>Walk frames (no pose)</button>
+  </div>
+  <table id="frameTable"></table>
+</section>
+
+<section>
+  <h2>5 · Pose analysis</h2>
+  <div class="row">
+    <select id="modelSel">
+      <option value="lite" selected>lite model</option>
+      <option value="full">full model</option>
+      <option value="heavy">heavy model</option>
+    </select>
+    <select id="delSel">
+      <option value="GPU" selected>GPU delegate</option>
+      <option value="CPU">CPU delegate</option>
+    </select>
+    <select id="modeSel">
+      <option value="seek" selected>seek-step (lossless)</option>
+      <option value="playback">playback rVFC</option>
+    </select>
+    <button id="poseBtn" disabled>Run pose analysis</button>
+    <button class="sec" id="cancelBtn" disabled>Cancel</button>
+  </div>
+  <div class="bar"><i id="prog"></i></div>
+  <table id="poseTable"></table>
+  <canvas id="overlay"></canvas>
+  <div class="log" id="log"></div>
+</section>
+
+<section>
+  <h2>6 · Report</h2>
+  <div class="row">
+    <button class="sec" id="copyBtn">Copy report JSON</button>
+    <button class="sec" id="resetBtn">Reset spike data</button>
+  </div>
+  <pre id="report">Run the steps above.</pre>
+</section>
+
+<script type="module">
+import { readMetadata } from './mp4meta.js';
+import * as store from './mediastore.js';
+import { initPose, detect, isReady, resetTimeline, GROUPS, close as closePose } from './pose.js';
+import { walkFrames, stepFrames, groupVisibility, wristKinematics } from './frames.js';
+
+const $ = (id) => document.getElementById(id);
+const KEY = 'spike-video';
+const R = { startedAt: new Date().toISOString() };   // the report object
+let file = null, blobUrl = null, abort = null;
+
+const log = (m) => { const l = $('log'); l.textContent = `${new Date().toISOString().slice(11,19)}  ${m}\n` + l.textContent; };
+const rows = (el, obj) => {
+  el.innerHTML = Object.entries(obj).map(([k, v]) => {
+    const cls = v === true ? 'ok' : v === false ? 'bad' : '';
+    const val = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
+    return `<tr><td>${k}</td><td class="v ${cls}">${val}</td></tr>`;
+  }).join('');
+};
+const dump = () => { $('report').textContent = JSON.stringify(R, null, 1); };
+
+// ---------- 1. Environment ----------
+(async function env() {
+  const v = document.createElement('video');
+  R.environment = {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+    deviceMemoryGB: navigator.deviceMemory ?? null,
+    devicePixelRatio: devicePixelRatio,
+    screen: `${screen.width}x${screen.height}`,
+    standalone: !!(navigator.standalone || matchMedia('(display-mode: standalone)').matches),
+    requestVideoFrameCallback: typeof v.requestVideoFrameCallback === 'function',
+    WebCodecs_VideoDecoder: typeof VideoDecoder !== 'undefined',
+    OffscreenCanvas: typeof OffscreenCanvas !== 'undefined',
+    WebGL2: !!document.createElement('canvas').getContext('webgl2'),
+    WebGPU: !!navigator.gpu,
+    WebAssembly: typeof WebAssembly !== 'undefined',
+    MediaRecorder: typeof MediaRecorder !== 'undefined',
+    indexedDB: typeof indexedDB !== 'undefined',
+    OPFS: !!navigator.storage?.getDirectory,
+  };
+  R.storage = await store.storageReport();
+  rows($('envTable'), { ...R.environment, ...R.storage });
+  dump();
+})();
+
+// ---------- 2. Import ----------
+$('pick').addEventListener('change', async (e) => {
+  file = e.target.files[0];
+  if (!file) return;
+  log(`picked ${file.name} (${(file.size/1048576).toFixed(1)} MB)`);
+  let meta;
+  try {
+    meta = await readMetadata(file);
+  } catch (err) {
+    R.import = { ok: false, error: String(err) };
+    rows($('metaTable'), R.import); dump(); return;
+  }
+  const expectedFrames = meta.frameCount;
+  R.import = {
+    fileName: meta.fileName, reportedType: meta.fileType,
+    fileBytes: meta.fileBytes, fileMB: +(meta.fileBytes/1048576).toFixed(2),
+    containerBrand: meta.container, brands: meta.brands.join(','),
+    codec: meta.codec, width: meta.width, height: meta.height,
+    rotationDeg: meta.rotation, durationMs: meta.durationMs,
+    frameCount: expectedFrames, fps: meta.fps,
+    variableFrameRate: meta.variableFrameRate,
+    fpsMin: meta.fpsMin, fpsMax: meta.fpsMax,
+    parsedContainer: meta.parsed, notes: meta.notes.join('; ') || 'none',
+    meetsSpec60fps: meta.fps ? meta.fps >= 59 : 'unknown',
+  };
+  // Playback-reported values, to see whether the browser agrees with the file.
+  const probe = document.createElement('video');
+  probe.preload = 'metadata'; probe.muted = true; probe.playsInline = true;
+  probe.src = URL.createObjectURL(file);
+  await new Promise((res) => { probe.onloadedmetadata = res; probe.onerror = res; setTimeout(res, 4000); });
+  R.import.decodedWidth = probe.videoWidth || null;
+  R.import.decodedHeight = probe.videoHeight || null;
+  R.import.decodedDurationMs = probe.duration ? Math.round(probe.duration * 1000) : null;
+  R.import.browserCanDecode = !!probe.videoWidth;
+  // A mismatch here is the orientation trap: the container says portrait,
+  // the decoder hands you landscape plus a rotation to apply.
+  R.import.dimensionsMatchContainer =
+    meta.width && probe.videoWidth ? (meta.width === probe.videoWidth) : 'unknown';
+  URL.revokeObjectURL(probe.src);
+
+  rows($('metaTable'), R.import);
+  ['saveBtn','framesBtn','poseBtn'].forEach((b) => { $(b).disabled = !R.import.browserCanDecode; });
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = URL.createObjectURL(file);
+  $('player').src = blobUrl;
+  dump();
+});
+
+// ---------- 3. Storage ----------
+$('saveBtn').addEventListener('click', async () => {
+  const before = await store.storageReport();
+  const t0 = performance.now();
+  const res = await store.put(KEY, file);
+  const ms = Math.round(performance.now() - t0);
+  const after = await store.storageReport();
+  R.storageTest = {
+    saveOk: res.ok, saveError: res.error || null, saveMs: ms,
+    savedBytes: file.size,
+    usageBeforeMB: before.usageMB, usageAfterMB: after.usageMB,
+    quotaMB: after.quotaMB, percentUsed: after.percentUsed,
+  };
+  rows($('storeTable'), R.storageTest);
+  $('loadBtn').disabled = !res.ok; $('delBtn').disabled = !res.ok;
+  log(res.ok ? `saved in ${ms}ms` : `SAVE FAILED: ${res.error}`);
+  dump();
+});
+
+$('loadBtn').addEventListener('click', async () => {
+  const t0 = performance.now();
+  const blob = await store.get(KEY);
+  const ms = Math.round(performance.now() - t0);
+  R.storageTest = R.storageTest || {};
+  R.storageTest.reloadMs = ms;
+  R.storageTest.reloadOk = !!blob;
+  R.storageTest.reloadBytes = blob ? blob.size : null;
+  R.storageTest.reloadTypePreserved = blob ? (blob.type || '(empty)') : null;
+  R.storageTest.byteForByte = blob ? blob.size === file?.size : null;
+  if (blob) {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = URL.createObjectURL(blob);
+    $('player').src = blobUrl;
+    file = new File([blob], R.import?.fileName || 'reloaded', { type: blob.type });
+  }
+  rows($('storeTable'), R.storageTest);
+  log(`reloaded ${blob ? blob.size + ' bytes' : 'NOTHING'} in ${ms}ms`);
+  dump();
+});
+
+$('delBtn').addEventListener('click', async () => {
+  await store.del(KEY);
+  const after = await store.storageReport();
+  R.storageTest = { ...(R.storageTest||{}), deleted: true, usageAfterDeleteMB: after.usageMB,
+                    remainingKeys: (await store.keys()).length };
+  rows($('storeTable'), R.storageTest);
+  log('deleted'); dump();
+});
+
+$('persistBtn').addEventListener('click', async () => {
+  const res = await store.requestPersistence();
+  R.persistence = res;
+  R.storage = await store.storageReport();
+  rows($('envTable'), { ...R.environment, ...R.storage, persistResult: JSON.stringify(res) });
+  log(`persist → ${JSON.stringify(res)}`); dump();
+});
+
+// ---------- responsiveness probe ----------
+// Measures the longest gap between animation frames while work runs. This
+// is the number that decides whether pose can stay on the main thread.
+function startJankProbe() {
+  let last = performance.now(), max = 0, n = 0, total = 0, stop = false;
+  const tick = (t) => {
+    const gap = t - last; last = t;
+    if (gap > max) max = gap;
+    total += gap; n += 1;
+    if (!stop) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  return () => { stop = true; return { maxGapMs: Math.round(max), meanGapMs: +(total / Math.max(n,1)).toFixed(1), samples: n }; };
+}
+
+// ---------- 4. Frame access ----------
+$('framesBtn').addEventListener('click', async () => {
+  const rate = parseFloat($('rateSel').value);
+  const v = $('player');
+  const stopJank = startJankProbe();
+  const res = await walkFrames(v, { playbackRate: rate });
+  const jank = stopJank();
+  const expected = R.import?.frameCount || null;
+  R.frameAccess = {
+    playbackRate: rate,
+    callbacks: res.callbacks,
+    presentedSpan: res.presentedSpan,
+    expectedFrames: expected,
+    capturedPct: expected ? +((res.callbacks / expected) * 100).toFixed(1) : null,
+    meanFrameDeltaMs: res.meanDeltaMs,
+    sourceFrameIntervalMs: R.import?.fps ? +(1000 / R.import.fps).toFixed(2) : null,
+    wallMs: res.wallMs,
+    uiMaxGapMs: jank.maxGapMs,
+  };
+  rows($('frameTable'), R.frameAccess);
+  log(`frames: ${res.callbacks} callbacks vs ${expected} in file`);
+  dump();
+});
+
+// ---------- 5. Pose ----------
+$('poseBtn').addEventListener('click', async () => {
+  const model = $('modelSel').value, delegate = $('delSel').value;
+  $('poseBtn').disabled = true; $('cancelBtn').disabled = false;
+  abort = new AbortController();
+  try {
+    if (!isReady()) {
+      log(`loading pose model (${model}/${delegate})…`);
+      R.poseInit = await initPose({ model, delegate });
+      log(`model ready in ${R.poseInit.totalMs}ms`);
+    }
+  } catch (err) {
+    R.poseInit = { ok: false, error: String(err) };
+    rows($('poseTable'), R.poseInit); dump();
+    $('poseBtn').disabled = false; $('cancelBtn').disabled = true;
+    return;
+  }
+
+  const v = $('player');
+  const cv = $('overlay');
+  cv.width = Math.min(v.videoWidth || 720, 720);
+  cv.height = Math.round(cv.width * ((v.videoHeight||1280) / (v.videoWidth||720)));
+  const ctx = cv.getContext('2d');
+  const rate = parseFloat($('rateSel').value);
+  const expected = R.import?.frameCount || 0;
+
+  const series = [];
+  let detOk = 0, detEmpty = 0, detMs = 0, maxDetMs = 0;
+
+  // Warm the model BEFORE timing or walking. The first inference compiles
+  // shaders and cost 7.1 s on this machine — during which a playback-driven
+  // walk had already run the clip to the end and "succeeded" with 2 of 145
+  // frames. Warm-up is measured separately because it is a real cost the
+  // golfer waits through once, not a per-frame cost.
+  resetTimeline();   // each run starts a fresh monotonic timeline
+  const w0 = performance.now();
+  try { detect(v, 0); } catch { /* expected on some first calls */ }
+  const warmupMs = Math.round(performance.now() - w0);
+  log(`model warm-up ${warmupMs}ms`);
+
+  const onFrame = async (meta) => {
+    const ts = Math.max(1, Math.round(meta.mediaTime * 1000));
+    const d0 = performance.now();
+    let out = null;
+    try { out = detect(v, ts); } catch (e) { /* timestamp ordering can throw */ }
+    const dms = performance.now() - d0;
+    detMs += dms; if (dms > maxDetMs) maxDetMs = dms;
+    const lm = out?.landmarks?.[0];
+    if (lm) { detOk += 1; series.push({ mediaTime: meta.mediaTime, landmarks: lm, vis: groupVisibility(lm) }); }
+    else detEmpty += 1;
+    if (expected) $('prog').style.width = `${Math.min(100, ((detOk+detEmpty)/expected)*100)}%`;
+    if (lm) {
+      ctx.drawImage(v, 0, 0, cv.width, cv.height);
+      ctx.fillStyle = '#23d67f';
+      for (const [, idx] of Object.entries(GROUPS)) {
+        for (const i of idx) {
+          const p = lm[i]; if (!p) continue;
+          ctx.beginPath(); ctx.arc(p.x*cv.width, p.y*cv.height, 4, 0, 7); ctx.fill();
+        }
+      }
+    }
+  };
+
+  const stopJank = startJankProbe();
+  const t0 = performance.now();
+  const mode = $('modeSel').value;
+  let walk;
+  if (mode === 'seek') {
+    walk = await stepFrames(v, { fps: R.import?.fps, frameCount: expected, onFrame, signal: abort.signal });
+  } else {
+    walk = await walkFrames(v, { playbackRate: rate, signal: abort.signal, onFrame });
+  }
+  const jank = stopJank();
+  const wall = performance.now() - t0;
+
+  // Per-group visibility, averaged and worst-case.
+  const groups = {};
+  for (const g of Object.keys(GROUPS)) {
+    const vals = series.map((f) => f.vis[g]);
+    groups[g] = vals.length ? {
+      mean: +(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(3),
+      min: +Math.min(...vals).toFixed(3),
+      pctAbove0_5: +((vals.filter((x)=>x>=0.5).length/vals.length)*100).toFixed(1),
+    } : null;
+  }
+
+  R.poseRun = {
+    model, delegate, mode, playbackRate: rate, warmupMs,
+    walk: walk && walk.frames ? { ...walk, frames: `${walk.frames.length} samples (omitted)` } : walk,
+    framesWithPose: detOk, framesWithoutPose: detEmpty,
+    expectedSourceFrames: expected,
+    coveragePct: expected ? +((detOk/expected)*100).toFixed(1) : null,
+    wallMs: Math.round(wall),
+    meanDetectMs: detOk ? +(detMs/(detOk+detEmpty)).toFixed(1) : null,
+    maxDetectMs: Math.round(maxDetMs),
+    realtimeFactor: R.import?.durationMs ? +(wall / R.import.durationMs).toFixed(2) : null,
+    uiMaxGapMs: jank.maxGapMs, uiMeanGapMs: jank.meanGapMs,
+    memoryMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize/1048576) : 'unavailable',
+  };
+  R.landmarkVisibility = groups;
+  R.swingKinematics = wristKinematics(series) || 'no pose frames';
+
+  rows($('poseTable'), { ...R.poseRun });
+  log(`pose: ${detOk}/${expected} frames, ${Math.round(wall)}ms, max UI gap ${jank.maxGapMs}ms`);
+  $('poseBtn').disabled = false; $('cancelBtn').disabled = true;
+  dump();
+});
+
+$('cancelBtn').addEventListener('click', () => { abort?.abort(); $('player').pause(); log('cancelled'); });
+
+// ---------- 6. Report ----------
+$('copyBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(JSON.stringify(R, null, 1)); log('report copied'); }
+  catch { log('clipboard blocked — select the text below instead'); }
+});
+$('resetBtn').addEventListener('click', async () => {
+  await store.clearAll(); closePose();
+  log('spike data cleared'); 
+  R.storage = await store.storageReport(); dump();
+});
+</script>
+</body>
+</html>

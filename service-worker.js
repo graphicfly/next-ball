@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v74';
+const CACHE_NAME = 'nextball-v75';
 // NOTE: vendor/maplibre is deliberately NOT precached (§14.5). At 1.01 MB it
 // is larger than the entire rest of the app, for a screen half of all
 // courses cannot show — precaching it would roughly double a fresh install.
@@ -103,7 +103,11 @@ self.addEventListener('activate', (event) => {
 // The stronger protection is to put any future API on a DIFFERENT ORIGIN
 // (api.nextballgolf.com), which never reaches this handler at all. This is
 // the backstop for when that is not possible.
-const DYNAMIC_PATHS = ['/api/', '/media/', '/analysis/'];
+// '/spike/' is the Swing Lab feasibility prototype. It is excluded for a
+// practical reason as much as a principled one: a cache-first app shell
+// would pin whichever build of the prototype a test phone saw first, and
+// iterating on a real device is the entire point of it.
+const DYNAMIC_PATHS = ['/api/', '/media/', '/analysis/', '/spike/'];
 
 function isDynamicPath(url) {
   return DYNAMIC_PATHS.some((prefix) => url.pathname.startsWith(prefix));

@@ -24,6 +24,8 @@ describe('Service worker — what must never be cached as app shell', () => {
     assert.equal(isDynamicPath(at('/api/interpret')), true);
     assert.equal(isDynamicPath(at('/media/abc123.mp4')), true);
     assert.equal(isDynamicPath(at('/analysis/job/42')), true);
+    // The feasibility prototype, which must never be pinned by the cache.
+    assert.equal(isDynamicPath(at('/spike/swing/index.html')), true);
   });
 
   test('every real application asset is still cacheable', () => {
@@ -46,7 +48,7 @@ describe('Service worker — what must never be cached as app shell', () => {
   test('the prefix list is exactly what is documented', () => {
     const list = SRC.match(/const DYNAMIC_PATHS = \[([^\]]*)\]/)[1];
     const parsed = [...list.matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    assert.deepEqual(parsed, ['/api/', '/media/', '/analysis/']);
+    assert.deepEqual(parsed, ['/api/', '/media/', '/analysis/', '/spike/']);
     // Trailing slashes matter: '/api' alone would also exclude '/apiary.js'.
     for (const p of parsed) assert.ok(p.endsWith('/'), `${p} needs a trailing slash`);
   });
