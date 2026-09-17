@@ -70,7 +70,18 @@ export function config() { return loadedWith; }
 // counter is what MediaPipe actually receives.
 let lastTs = 0;
 
-export function resetTimeline() { lastTs = 0; }
+// Starting a new run must NOT rewind the counter. MediaPipe's graph keeps
+// its own clock for the life of the landmarker, so sending a lower
+// timestamp after a previous run does not start a new timeline — it fails
+// the whole graph with "current minimum expected timestamp is 167001 but
+// received 1000". Resetting to zero is the intuitive fix and it is wrong.
+//
+// Instead the counter jumps forward by a wide gap, which is monotonic (so
+// the graph accepts it) and discontinuous (so per-frame tracking treats the
+// next frame as a new scene rather than a continuation).
+const RUN_GAP_MS = 60000;
+
+export function resetTimeline() { lastTs += RUN_GAP_MS; }
 
 export function detect(source, timestampMs) {
   if (!landmarker) throw new Error('pose not initialised');
