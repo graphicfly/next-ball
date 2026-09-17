@@ -141,6 +141,17 @@ function pointsOf(el) {
   return [];
 }
 
+// The OSM metadata the duplicate-ref tiebreak needs, carried through to the
+// normalized feature and on into the stored record so the choice stays
+// auditable after the fact — "which of the two ref=1 features did we take,
+// and how old was it?" is answerable from the cache alone.
+//
+// `out geom tags meta` supplies both. They are NOT interchangeable, and
+// Oakmont proves it: the stale 2010 hole-1 area is version 5 while the
+// correct 2026 line is version 1, because version counts edits to a single
+// element and says nothing across two different ones. Timestamp is the only
+// recency signal; version is kept for provenance and as a last deterministic
+// tiebreak, never as "newer".
 function baseFeature(el) {
   const points = pointsOf(el);
   if (!points.length) return null;
@@ -149,7 +160,8 @@ function baseFeature(el) {
     points,
     centroid: polygonCentroid(points),
     closed: isClosedWay(points),
-    timestamp: el.timestamp || '',
+    osm_timestamp: typeof el.timestamp === 'string' ? el.timestamp : null,
+    osm_version: Number.isFinite(el.version) ? el.version : null,
   };
 }
 
@@ -218,7 +230,11 @@ export function orientHoleLine(hole, tees) {
 //      is meaningless as a hole;
 //   2. then the better endpoint fit — start nearest a tee plus end nearest
 //      a green;
-//   3. then the most recently edited.
+//   3. then the most recently edited, by timestamp;
+//   4. then the higher version, purely so the result is stable when two
+//      features carry the same timestamp. This is a determinism tiebreak
+//      and not a recency one — see baseFeature() for why version cannot be
+//      compared across elements.
 export function chooseHoleFeature(candidates, { tees = [], greens = [] } = {}) {
   if (!candidates || !candidates.length) return null;
   if (candidates.length === 1) return candidates[0];
@@ -236,7 +252,9 @@ export function chooseHoleFeature(candidates, { tees = [], greens = [] } = {}) {
     if (a.closed !== b.closed) return a.closed ? 1 : -1;
     const d = score(a) - score(b);
     if (d !== 0 && Number.isFinite(d)) return d;
-    return String(b.timestamp).localeCompare(String(a.timestamp));
+    const byTime = String(b.osm_timestamp || '').localeCompare(String(a.osm_timestamp || ''));
+    if (byTime !== 0) return byTime;
+    return (b.osm_version || 0) - (a.osm_version || 0);
   })[0];
 }
 
@@ -281,6 +299,8 @@ export function measureHole(association) {
       tee: colour,
       centroid: tee.centroid,
       osm_id: tee.osm_id,
+      osm_timestamp: tee.osm_timestamp,
+      osm_version: tee.osm_version,
       yards: Math.round(metersToYards(haversineMeters(tee.centroid, green.centroid))),
     });
   }
@@ -314,6 +334,12 @@ export function buildHoleMapping({ greens = [], tees = [], holes = [] } = {}) {
       hole_number: holeNumber,
       par: hole.par,
       hole_osm_id: hole.osm_id,
+      hole_osm_timestamp: hole.osm_timestamp,
+      hole_osm_version: hole.osm_version,
+      // How many features claimed this ref. Never shown to the golfer
+      // (§14.7 forbids making a prompt of it), but it records that a choice
+      // was made rather than that only one candidate existed.
+      ref_candidates: candidates.length,
       green: assoc.green ? greenRecord(assoc.green) : null,
       tees: measureHole(assoc),
     });
@@ -324,6 +350,8 @@ export function buildHoleMapping({ greens = [], tees = [], holes = [] } = {}) {
 function greenRecord(green) {
   return {
     osm_id: green.osm_id,
+    osm_timestamp: green.osm_timestamp,
+    osm_version: green.osm_version,
     centroid: green.centroid,
     // The full ring, because front/back are computed live from it on every
     // position update (§14.7 level A) and cannot be derived from the centre.

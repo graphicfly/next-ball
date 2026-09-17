@@ -6,6 +6,7 @@ import { resetDB } from './setup.js';
 import {
   haversineMeters, polygonCentroid, polygonMaxSpanMeters, distinctRing,
   isClosedWay, greenEdgeDistances, greenEdgeYards, metersToYards, nearestTo,
+  rayRingCrossings,
 } from '../js/geo.js';
 import {
   parseGolfElements, buildHoleMapping, buildCourseGeometry, chooseHoleFeature,
@@ -95,17 +96,26 @@ describe('Geometry primitives', () => {
   });
 });
 
-describe('Green front / centre / back — dynamic, never stored', () => {
+describe('Green front / centre / back — boundary intersection, computed live', () => {
   const green = geometry.greens.find((g) => g.span_m === 28.3);
-
-  // A position on the line of play, ~150 m short of the green.
   const approach = { lat: green.centroid.lat - 0.0013, lon: green.centroid.lon - 0.0002 };
 
-  test('front <= centre <= back by construction', async () => {
+  // A local-meters helper so a test polygon can be reasoned about in metres
+  // rather than decimal degrees. x is east, y is north.
+  // Uses the same spherical constant as geo.js's local frame, so these
+  // fixtures are exact in the model under test rather than off by the ~0.5%
+  // between a spherical and an ellipsoidal metres-per-degree.
+  const ORIGIN = { lat: 38.880, lon: -77.316 };
+  const M_PER_DEG = (Math.PI / 180) * 6371000;
+  const M_LON = 1 / (M_PER_DEG * Math.cos(ORIGIN.lat * Math.PI / 180));
+  const at = (x, y) => ({ lat: ORIGIN.lat + y / M_PER_DEG, lon: ORIGIN.lon + x * M_LON });
+
+  test('front <= centre <= back on a real green', async () => {
     const d = greenEdgeDistances(approach, green.polygon, green.centroid);
-    assert.ok(d, 'a polygon yields three distances');
+    assert.ok(d);
     assert.ok(d.front_m <= d.center_m, `${d.front_m} <= ${d.center_m}`);
     assert.ok(d.center_m <= d.back_m, `${d.center_m} <= ${d.back_m}`);
+    assert.equal(d.inside_green, false);
   });
 
   test('depth between front and back never exceeds the green span', async () => {
@@ -115,32 +125,81 @@ describe('Green front / centre / back — dynamic, never stored', () => {
     assert.ok(depth <= green.span_m + 0.01, `depth ${depth} <= span ${green.span_m}`);
   });
 
-  // §14.7 level A: they change as the golfer walks. If they did not, they
-  // would have been stored rather than computed.
+  // The correction that matters: front and back are where the line of play
+  // crosses the BOUNDARY, not the nearest and farthest vertices. This
+  // polygon separates the two answers — its nearest vertex sits 90 m away
+  // off to one side, while the line of play actually crosses the sloping
+  // near edge at 120 m.
+  test('edges are true boundary intersections, not nearest/farthest vertices', async () => {
+    const poly = [at(-80, 90), at(80, 150), at(80, 200), at(-80, 200)];
+    const centre = polygonCentroid(poly);          // mean -> (0, 160)
+    const golfer = ORIGIN;                          // looking due north
+
+    assert.ok(Math.abs(centre.lat - at(0, 160).lat) < 1e-7, 'centroid is due north');
+
+    const d = greenEdgeDistances(golfer, poly, centre);
+    assert.ok(Math.abs(d.front_m - 120) < 1.5, `front should cross the sloping edge at ~120 m, got ${d.front_m}`);
+    assert.ok(Math.abs(d.back_m - 200) < 1.5, `back should be the far edge at ~200 m, got ${d.back_m}`);
+
+    // What the vertex approximation would have produced, for contrast: the
+    // smallest projection of any vertex onto the line of play is 90 m, at a
+    // corner the ball never flies over. 30 m of error on one green.
+    const projections = poly.map((p) => {
+      const dLat = (p.lat - golfer.lat) * M_PER_DEG;   // the line of play is due north
+      return dLat;
+    });
+    assert.ok(Math.abs(Math.min(...projections) - 90) < 1.5, 'the vertex approximation would say 90');
+    assert.ok(Math.abs(d.front_m - Math.min(...projections)) > 25, 'the two approaches genuinely differ here');
+  });
+
+  test('a square gives exact, symmetric edges head-on', async () => {
+    const sq = [at(-50, -50), at(50, -50), at(50, 50), at(-50, 50)];
+    const centre = polygonCentroid(sq);
+    const d = greenEdgeDistances(at(0, -200), sq, centre);
+    assert.ok(Math.abs(d.front_m - 150) < 1, `front ${d.front_m}`);
+    assert.ok(Math.abs(d.center_m - 200) < 1, `centre ${d.center_m}`);
+    assert.ok(Math.abs(d.back_m - 250) < 1, `back ${d.back_m}`);
+  });
+
+  test('the chord lengthens on a diagonal approach', async () => {
+    const sq = [at(-50, -50), at(50, -50), at(50, 50), at(-50, 50)];
+    const centre = polygonCentroid(sq);
+    const straight = greenEdgeDistances(at(0, -250), sq, centre);
+    const diagonal = greenEdgeDistances(at(-180, -180), sq, centre);
+    assert.ok(Math.abs((straight.back_m - straight.front_m) - 100) < 1, 'head-on crosses 100 m of square');
+    assert.ok(diagonal.back_m - diagonal.front_m > 110, 'a diagonal chord is longer');
+  });
+
+  // §14.7 level A: they change as the golfer walks.
   test('the three values change with position', async () => {
     const near = { lat: green.centroid.lat - 0.0004, lon: green.centroid.lon };
     const far = { lat: green.centroid.lat - 0.0030, lon: green.centroid.lon };
     const a = greenEdgeYards(near, green.polygon, green.centroid);
     const b = greenEdgeYards(far, green.polygon, green.centroid);
-    assert.notEqual(a.center, b.center);
     assert.ok(b.center > a.center);
+    assert.ok(b.front > a.front);
   });
 
-  // ...and with the approach angle, at a constant distance from the centre.
-  test('they change with approach angle at the same distance', async () => {
+  test('and with the approach angle at a constant distance from the centre', async () => {
     const r = 0.0012;
     const south = { lat: green.centroid.lat - r, lon: green.centroid.lon };
     const east = { lat: green.centroid.lat, lon: green.centroid.lon + r / Math.cos(green.centroid.lat * Math.PI / 180) };
     const a = greenEdgeDistances(south, green.polygon, green.centroid);
     const b = greenEdgeDistances(east, green.polygon, green.centroid);
     assert.ok(Math.abs(a.center_m - b.center_m) < 2, 'same distance to centre');
-    // Depth is measured across the green on the line of play, so a
-    // different bearing crosses a different chord. Compared unrounded: a
-    // near-circular green can give two bearings the same whole metre.
     const depthA = a.back_m - a.front_m;
     const depthB = b.back_m - b.front_m;
-    assert.notEqual(depthA, depthB, 'depth depends on the bearing');
+    assert.notEqual(depthA, depthB, 'a different bearing crosses a different chord');
     for (const d of [depthA, depthB]) assert.ok(d > 0 && d <= green.span_m + 0.01);
+  });
+
+  test('standing on the green reports no distance to a front edge', async () => {
+    const d = greenEdgeDistances(green.centroid.lat ? { lat: green.centroid.lat + 0.00003, lon: green.centroid.lon } : null,
+      green.polygon, green.centroid);
+    assert.ok(d, 'still measurable from inside');
+    assert.equal(d.inside_green, true);
+    assert.equal(d.front_m, 0, 'the front edge is behind the golfer');
+    assert.ok(d.back_m > 0);
   });
 
   // §14.7 level B and §14.13.3: a captured green is one point. Front and
@@ -153,6 +212,19 @@ describe('Green front / centre / back — dynamic, never stored', () => {
 
   test('standing exactly on the centre has no line of play, so no edges', async () => {
     assert.equal(greenEdgeDistances(green.centroid, green.polygon, green.centroid), null);
+  });
+
+  test('a ray that misses the ring entirely yields null, not a guess', async () => {
+    const poly = [at(-10, 100), at(10, 100), at(10, 120), at(-10, 120)];
+    // Aim well to the side of the polygon rather than at its centre.
+    assert.equal(greenEdgeDistances(ORIGIN, poly, at(500, 110)), null);
+  });
+
+  test('crossings come back sorted, nearest first', async () => {
+    const sq = [at(-50, -50), at(50, -50), at(50, 50), at(-50, 50)];
+    const hits = rayRingCrossings(at(0, -200), sq, polygonCentroid(sq));
+    assert.equal(hits.length, 2);
+    assert.ok(hits[0] < hits[1]);
   });
 
   test('yards are whole numbers — §14.6 forbids decimals', async () => {
@@ -243,12 +315,76 @@ describe('Duplicate ref values are normal data, not an error', () => {
 
   test('tiebreak falls through to the most recent edit when shape and fit tie', async () => {
     const mk = (id, ts) => ({
-      osm_id: id, hole_number: 5, par: 3, closed: false, timestamp: ts,
+      osm_id: id, hole_number: 5, par: 3, closed: false, osm_timestamp: ts, osm_version: 1,
       points: [{ lat: 38.878, lon: -77.316 }, { lat: 38.879, lon: -77.317 }],
       centroid: { lat: 38.8785, lon: -77.3165 },
     });
     const picked = chooseHoleFeature([mk('way/1', '2010-01-01T00:00:00Z'), mk('way/2', '2026-01-01T00:00:00Z')], {});
     assert.equal(picked.osm_id, 'way/2');
+  });
+
+  // The metadata the tiebreak runs on must survive into the normalized
+  // feature and the stored record, so the choice stays auditable from the
+  // cache alone.
+  test('OSM timestamp and version are preserved on every feature kind', async () => {
+    const parsed = parseGolfElements(FIXTURE.elements);
+    for (const f of [...parsed.greens, ...parsed.tees, ...parsed.holes]) {
+      assert.match(f.osm_timestamp, /^\d{4}-\d{2}-\d{2}T/, f.osm_id);
+      assert.ok(Number.isFinite(f.osm_version) && f.osm_version >= 1, f.osm_id);
+    }
+  });
+
+  test('and survive into the stored geometry record', async () => {
+    const h1 = holeByNumber(1);
+    assert.equal(h1.hole_osm_timestamp, '2026-09-17T13:11:06Z');
+    assert.equal(h1.hole_osm_version, 1);
+    assert.equal(h1.ref_candidates, 2, 'it records that a choice was made');
+    assert.ok(h1.green.osm_timestamp);
+    assert.ok(Number.isFinite(h1.green.osm_version));
+    for (const t of h1.tees) {
+      assert.ok(t.osm_timestamp);
+      assert.ok(Number.isFinite(t.osm_version));
+    }
+  });
+
+  test('a hole with only one candidate records that too', async () => {
+    assert.equal(holeByNumber(2).ref_candidates, 1);
+  });
+
+  // Version counts edits to ONE element and is meaningless across two.
+  // Oakmont is the proof: the stale 2010 area is version 5, the correct 2026
+  // line is version 1. Ranking by version would pick the wrong feature on
+  // exactly the case this tiebreak exists for.
+  test('version is never used as a recency signal', async () => {
+    const parsed = parseGolfElements(FIXTURE.elements);
+    const ones = parsed.holes.filter((h) => h.hole_number === 1);
+    const area = ones.find((h) => h.closed);
+    const line = ones.find((h) => !h.closed);
+    assert.equal(area.osm_version, 5, 'the stale area really is on its fifth version');
+    assert.equal(line.osm_version, 1, 'and the correct line is on its first');
+    assert.ok(area.osm_version > line.osm_version, 'so version alone would choose wrongly');
+    assert.equal(chooseHoleFeature(ones, parsed).osm_id, line.osm_id);
+    assert.equal(holeByNumber(1).hole_osm_version, 1);
+  });
+
+  test('version breaks a tie only when timestamps are identical', async () => {
+    const mk = (id, ts, version) => ({
+      osm_id: id, hole_number: 7, par: 3, closed: false, osm_timestamp: ts, osm_version: version,
+      points: [{ lat: 38.878, lon: -77.316 }, { lat: 38.879, lon: -77.317 }],
+      centroid: { lat: 38.8785, lon: -77.3165 },
+    });
+    const same = '2026-01-01T00:00:00Z';
+    assert.equal(chooseHoleFeature([mk('way/1', same, 1), mk('way/2', same, 9)], {}).osm_id, 'way/2');
+    // ...and never over a newer timestamp.
+    assert.equal(chooseHoleFeature([mk('way/1', '2026-06-01T00:00:00Z', 1), mk('way/2', same, 9)], {}).osm_id, 'way/1');
+  });
+
+  test('missing metadata is tolerated rather than assumed', async () => {
+    const bare = [{ type: 'way', id: 9, tags: { golf: 'hole', ref: '4', par: '4' }, geometry: [{ lat: 1, lon: 1 }, { lat: 1.001, lon: 1.001 }] }];
+    const parsed = parseGolfElements(bare);
+    assert.equal(parsed.holes[0].osm_timestamp, null);
+    assert.equal(parsed.holes[0].osm_version, null);
+    assert.equal(chooseHoleFeature(parsed.holes, parsed).osm_id, 'way/9');
   });
 
   test('a lone candidate is returned untouched, and no candidates yields null', async () => {

@@ -117,57 +117,94 @@ export function localFrame(origin) {
   };
 }
 
+// Distances, in meters along the ray, at which the ray from `from` through
+// `towards` crosses the boundary of `ring`.
+//
+// The ray is cast in the local metric frame centred on `from`, so a returned
+// value IS the distance from the golfer to that crossing point. Only forward
+// crossings are returned; a crossing behind the golfer is not somewhere they
+// can aim.
+//
+// Segments exactly parallel to the ray are skipped: they contribute no
+// single crossing point, and a boundary edge lying precisely along the line
+// of play is a measure-zero case that the adjacent segments already bracket.
+export function rayRingCrossings(from, ring, towards) {
+  const pts = distinctRing(ring);
+  if (!isCoord(from) || !isCoord(towards) || pts.length < 3) return [];
+
+  const frame = localFrame(from);
+  const t = frame.to(towards);
+  const len = Math.hypot(t.x, t.y);
+  if (len < 1e-9) return [];
+  const d = { x: t.x / len, y: t.y / len };
+
+  const local = pts.map((p) => frame.to(p));
+  const cross = (px, py, qx, qy) => px * qy - py * qx;
+
+  const hits = [];
+  for (let i = 0; i < local.length; i++) {
+    const a = local[i];
+    const b = local[(i + 1) % local.length];
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+
+    // Solving  s * d = a + u * e  for the ray parameter s and the segment
+    // parameter u, with the origin at the golfer.
+    const denom = cross(d.x, d.y, ex, ey);
+    if (Math.abs(denom) < 1e-12) continue; // parallel
+    const s = cross(a.x, a.y, ex, ey) / denom;
+    const u = cross(a.x, a.y, d.x, d.y) / denom;
+    if (s < 0) continue;            // behind the golfer
+    if (u < 0 || u > 1) continue;   // outside this edge
+    hits.push(s);
+  }
+  return hits.sort((x, y) => x - y);
+}
+
 // Front / centre / back distances to a green, in meters, from wherever the
 // golfer is standing.
 //
-// §14.7 level A: a green is one polygon, not three stored points. Front and
-// back are the nearest and farthest points of that polygon measured ALONG
-// the line from the current position to the centre — so they change as the
-// golfer walks and as the approach angle changes. That is why they are
-// computed live and never stored.
+// §14.7 level A: a green is one polygon, not three stored points. The line
+// of play runs from the golfer's position through the green's centre; front
+// and back are where that line crosses the green's BOUNDARY, nearest and
+// farthest from the golfer. They change as the golfer walks and as the
+// approach angle changes, which is why they are computed live and never
+// stored.
 //
-// Each vertex is projected onto the unit vector pointing at the centre, so
-// the returned values are distances along the line of play rather than
-// straight-line distances to off-axis vertices. front <= center <= back
-// therefore holds by construction, and back - front is the green's depth on
-// that line rather than its widest span.
+// These are true edge intersections, not the nearest and farthest vertices.
+// A vertex approximation is wrong in two ways: it reports a corner the line
+// of play never crosses, and it can only ever land on a vertex, so it
+// systematically overstates depth on a green whose boundary between vertices
+// is what the ball actually flies over.
 //
 // Returns null when there is nothing to measure: no polygon (a captured
-// green is a single point — coverage level B, centre only), or the golfer
-// standing exactly on the centre, where the line has no direction.
+// green is a single point — coverage level B, centre only), the golfer
+// standing exactly on the centre, or a ray that misses the ring entirely,
+// which a strongly concave green can produce when its vertex mean falls
+// outside its own boundary.
 export function greenEdgeDistances(from, polygon, centroid) {
   if (!isCoord(from)) return null;
   const ring = distinctRing(polygon);
   const centre = isCoord(centroid) ? centroid : polygonCentroid(ring);
   if (!isCoord(centre) || ring.length < 3) return null;
 
-  const frame = localFrame(from);
-  const c = frame.to(centre);
-  const len = Math.hypot(c.x, c.y);
-  if (len < 1e-6) return null;
-  const ux = c.x / len;
-  const uy = c.y / len;
+  const hits = rayRingCrossings(from, ring, centre);
+  if (!hits.length) return null;
 
-  let front = Infinity;
-  let back = -Infinity;
-  for (const p of ring) {
-    const v = frame.to(p);
-    const t = v.x * ux + v.y * uy; // projection onto the line of play
-    if (t < front) front = t;
-    if (t > back) back = t;
-  }
+  // An odd number of forward crossings means the golfer is standing inside
+  // the green: the boundary ahead is the back edge and the front edge is
+  // behind them, so there is no positive distance to a front edge to report.
+  const inside = hits.length % 2 === 1;
 
   return {
-    front_m: front,
+    front_m: inside ? 0 : hits[0],
     center_m: haversineMeters(from, centre),
-    back_m: back,
+    back_m: hits[hits.length - 1],
+    inside_green: inside,
   };
 }
 
 // The same three distances in whole yards, ready for display (§14.6).
-// Negative projections are possible when the golfer has walked past the
-// front edge; they are clamped at zero rather than shown as a negative
-// distance, which would be meaningless on a chip reading "front".
 export function greenEdgeYards(from, polygon, centroid) {
   const d = greenEdgeDistances(from, polygon, centroid);
   if (!d) return null;
