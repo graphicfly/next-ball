@@ -6,7 +6,7 @@ import { resetDB } from './setup.js';
 import {
   haversineMeters, polygonCentroid, polygonMaxSpanMeters, distinctRing,
   isClosedWay, greenEdgeDistances, greenEdgeYards, metersToYards, nearestTo,
-  rayRingCrossings,
+  rayRingCrossings, bearingDegrees, boundsOf,
 } from '../js/geo.js';
 import {
   parseGolfElements, buildHoleMapping, buildCourseGeometry, chooseHoleFeature,
@@ -646,5 +646,59 @@ describe('Course geometry persistence', () => {
     const back = fresh.getCourseGeometry(course.course_id);
     assert.equal(back.counts.holes_mapped, 9);
     assert.equal(fresh.getCourseTees(course.course_id).length, 2);
+  });
+});
+
+describe('Bearing and framing for the Hole Map (§14.5)', () => {
+  test('bearing is degrees clockwise from north', async () => {
+    const o = { lat: 0, lon: 0 };
+    assert.equal(Math.round(bearingDegrees(o, { lat: 1, lon: 0 })), 0);
+    assert.equal(Math.round(bearingDegrees(o, { lat: 0, lon: 1 })), 90);
+    assert.equal(Math.round(bearingDegrees(o, { lat: -1, lon: 0 })), 180);
+    assert.equal(Math.round(bearingDegrees(o, { lat: 0, lon: -1 })), 270);
+  });
+
+  test('the hole-up bearing runs tee to green, and Oakmont 4 runs south', async () => {
+    const h4 = geometry.holes.find((h) => h.hole_number === 4);
+    const tee = h4.tees.find((t) => t.tee === 'blue');
+    const b = bearingDegrees(tee.centroid, h4.green.centroid);
+    assert.ok(b > 170 && b < 185, `hole 4 plays roughly south, got ${b.toFixed(1)}`);
+    // The reverse is the opposite heading — a map oriented on the wrong one
+    // would put the golfer above the green instead of below it.
+    const reverse = bearingDegrees(h4.green.centroid, tee.centroid);
+    const apart = (((reverse - b) % 360) + 360) % 360;
+    assert.ok(Math.abs(apart - 180) < 1, `bearings should be opposite, got ${apart.toFixed(1)}`);
+  });
+
+  test('every Oakmont hole yields a usable bearing', async () => {
+    for (const h of geometry.holes) {
+      const tee = h.tees[0];
+      const b = bearingDegrees(tee.centroid, h.green.centroid);
+      assert.ok(Number.isFinite(b) && b >= 0 && b < 360, `hole ${h.hole_number}`);
+    }
+  });
+
+  test('bearing refuses bad input rather than returning a number', async () => {
+    assert.equal(bearingDegrees(null, { lat: 1, lon: 1 }), null);
+    assert.equal(bearingDegrees({ lat: 1, lon: 1 }, undefined), null);
+  });
+
+  // §14.5: the map frames the green and the golfer, never the whole hole —
+  // fitting tee-to-green shrinks the green to a few pixels.
+  test('bounds cover a green tightly, and grow to include the golfer', async () => {
+    const h4 = geometry.holes.find((h) => h.hole_number === 4);
+    const greenOnly = boundsOf([h4.green.centroid, ...h4.green.polygon]);
+    const tee = h4.tees.find((t) => t.tee === 'blue').centroid;
+    const withGolfer = boundsOf([h4.green.centroid, ...h4.green.polygon, tee]);
+
+    const span = (b) => Math.abs(b[1][1] - b[0][1]);
+    assert.ok(span(greenOnly) < span(withGolfer), 'the green alone frames tighter');
+    assert.ok(withGolfer[0][1] <= tee.lat && tee.lat <= withGolfer[1][1], 'golfer is inside');
+  });
+
+  test('bounds of nothing is null, not an empty box', async () => {
+    assert.equal(boundsOf([]), null);
+    assert.equal(boundsOf(null), null);
+    assert.equal(boundsOf([{ lat: 'x', lon: 1 }]), null);
   });
 });

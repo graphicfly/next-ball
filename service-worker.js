@@ -1,4 +1,9 @@
-const CACHE_NAME = 'nextball-v66';
+const CACHE_NAME = 'nextball-v67';
+// NOTE: vendor/maplibre is deliberately NOT precached (§14.5). At 1.01 MB it
+// is larger than the entire rest of the app, for a screen half of all
+// courses cannot show — precaching it would roughly double a fresh install.
+// It is same-origin, so the runtime cache below picks it up on the first
+// Hole Map open and every later open is instant and works offline.
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -8,6 +13,7 @@ const PRECACHE_URLS = [
   './js/db.js',
   './js/geo.js',
   './js/courseGeometry.js',
+  './js/mapLibreLoader.js',
   './js/livePosition.js',
   './js/state.js',
   './js/version.js',

@@ -229,3 +229,34 @@ export function nearestTo(point, list, pick = (x) => x.centroid) {
   }
   return best === null ? null : { item: best, distance_m: bestD };
 }
+
+// Initial great-circle bearing from `a` to `b`, in degrees clockwise from
+// north. Used for the Hole Map's hole-up orientation (§14.5): the tee →
+// green bearing is computed ONCE when the map opens and held, so the map
+// never rotates while the golfer walks.
+export function bearingDegrees(a, b) {
+  if (!isCoord(a) || !isCoord(b)) return null;
+  const la1 = a.lat * DEG_TO_RAD;
+  const la2 = b.lat * DEG_TO_RAD;
+  const dLon = (b.lon - a.lon) * DEG_TO_RAD;
+  const y = Math.sin(dLon) * Math.cos(la2);
+  const x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dLon);
+  return (Math.atan2(y, x) / DEG_TO_RAD + 360) % 360;
+}
+
+// A bounding box, as [[west, south], [east, north]], around a set of
+// coordinates. The Hole Map frames the green and the golfer with this —
+// §14.5 is explicit that fitting the whole hole shrinks the green to a few
+// pixels and makes every yardage unreadable.
+export function boundsOf(coords) {
+  const pts = (coords || []).filter(isCoord);
+  if (!pts.length) return null;
+  let w = Infinity; let s = Infinity; let e = -Infinity; let n = -Infinity;
+  for (const p of pts) {
+    if (p.lon < w) w = p.lon;
+    if (p.lon > e) e = p.lon;
+    if (p.lat < s) s = p.lat;
+    if (p.lat > n) n = p.lat;
+  }
+  return [[w, s], [e, n]];
+}

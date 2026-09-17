@@ -95,9 +95,16 @@ export function weatherIconHtml(condition) {
 // single-task flows (starting/logging/reviewing a session) stay uncluttered.
 const NAV_ROUTES = new Set(['#/home', '#/history', '#/trends', '#/settings']);
 
+// The Hole Map is the one Course Mode screen that shows the bottom nav — an
+// approved exception to §11.2, per Reference C and §14.5. §14.12.4 records
+// the tension it creates: a golfer mid-round who taps History from the map
+// leaves the round. Nothing is lost (the round autosaves and resumes from
+// Home, §5.3), but it is an easy accidental exit, and it is deliberate.
+const NAV_ROUTE_PATTERNS = [/^#\/course\/map\/\d+$/];
+
 export function syncBottomNav(hash) {
   const appEl = document.getElementById('app');
-  const show = NAV_ROUTES.has(hash);
+  const show = NAV_ROUTES.has(hash) || NAV_ROUTE_PATTERNS.some((re) => re.test(hash));
   appEl?.classList.toggle('has-nav', show);
 
   let nav = document.getElementById('bottomNav');

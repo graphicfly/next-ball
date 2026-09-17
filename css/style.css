@@ -3284,11 +3284,11 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 .coverage-green { flex-shrink: 0; font-size: var(--text-caption); color: var(--color-text-tertiary); }
 .coverage-green.on { color: var(--color-accent); }
 
-/* ---------- View Map pill + Hole Map readout (§14.4, §14.5) ---------- */
 
-/* The pill sits at the hole card's top-right, beside the identity block —
-   one compact control, deliberately the only GPS affordance on the fast
-   scoring screen (§14.4). */
+/* ---------- View Map pill (§14.4) ---------- */
+
+/* The pill sits at the hole card's top-right — one compact control, and
+   deliberately the only GPS affordance on the fast scoring screen. */
 .hole-identity { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
 .hole-identity-text { min-width: 0; }
 .view-map-pill {
@@ -3311,36 +3311,153 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 .view-map-pill:active { transform: scale(0.97); }
 .view-map-pill:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
 
-.hole-map-published {
+/* ---------- Hole Map (§14.5, Reference C) ---------- */
+
+/* Full-bleed: the map is the screen. It escapes the app's side gutter the
+   same way the Home hero does, and the readout floats over its lower edge. */
+.hole-map-screen { position: relative; }
+.hole-map-topbar {
+  position: relative;
+  z-index: 2;
+  align-items: flex-start;
+}
+.hole-map-title { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.hole-map-hole { font-size: var(--text-body-lg); font-weight: var(--weight-semibold); }
+.hole-map-meta { font-size: var(--text-caption); color: var(--color-text-secondary); }
+
+.hole-map-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: var(--space-2) calc(-1 * var(--space-4)) 0;
+  background: var(--color-surface-2);
+  overflow: hidden;
+}
+.hole-map-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  text-align: center;
   font-size: var(--text-body);
   color: var(--color-text-secondary);
-  margin-bottom: var(--space-3);
 }
-.hole-map-readout { padding: var(--space-5) var(--space-4); text-align: center; }
-.hole-map-primary { display: flex; align-items: baseline; justify-content: center; gap: var(--space-2); }
+
+/* Exactly three controls, stacked right (§14.5): recentre, imagery,
+   reset-to-hole-up. MapLibre's own control cluster is never added. */
+.hole-map-controls {
+  position: absolute;
+  right: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.map-control {
+  width: var(--tap-min);
+  height: var(--tap-min);
+  border-radius: 50%;
+  border: 1px solid var(--color-divider);
+  background: rgba(10, 13, 16, 0.72);
+  backdrop-filter: blur(6px);
+  color: #f5f7f8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.map-control svg { width: 22px; height: 22px; }
+.map-control:active { transform: scale(0.94); }
+.map-control:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+/* Chips are pinned to the green centroid and separated by a pixel offset in
+   JS — their size must therefore stay fixed, never scale with zoom. Centre
+   carries the accent border and numeral because it is the number golfers
+   play to; front and back are neutral (§14.5). */
+.yardage-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 52px;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm, 10px);
+  background: rgba(10, 13, 16, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #f5f7f8;
+  line-height: 1.15;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.yardage-chip.center {
+  border-color: var(--color-accent);
+  background: rgba(10, 13, 16, 0.9);
+}
+.yardage-chip.center .chip-value { color: var(--color-accent); }
+.chip-value { font-size: var(--text-body-lg); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; }
+.chip-label { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(245, 247, 248, 0.72); }
+
+.golfer-marker { display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
+.golfer-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2f80ff;
+  border: 2.5px solid #fff;
+  box-shadow: 0 0 0 4px rgba(47, 128, 255, 0.28);
+}
+.golfer-label {
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(10, 13, 16, 0.82);
+  color: #f5f7f8;
+  white-space: nowrap;
+}
+
+/* Centre distance large, accuracy beside it and visually secondary — never
+   accented, never red. Poor accuracy is a condition, not an error (§14.8). */
+.hole-map-readout {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+}
+.hole-map-readout-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .hole-map-distance {
-  font-size: var(--text-display-lg, 3rem);
+  font-size: var(--text-display-lg);
   font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.hole-map-distance-label { font-size: var(--text-body-lg); color: var(--color-text-secondary); }
-/* Accuracy is always visible and always secondary — never accent, never
-   red. Poor accuracy is a condition, not an error (§14.8). */
-.hole-map-accuracy { margin-top: var(--space-3); font-size: var(--text-caption); color: var(--color-text-secondary); }
-
-.hole-map-edges { display: flex; gap: var(--space-3); margin-top: var(--space-3); }
-.edge-chip {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: var(--space-3);
-  border-radius: var(--radius-md, 12px);
-  background: var(--color-surface);
-  border: 1px solid var(--color-divider);
+.hole-map-distance-label { margin-top: 2px; font-size: var(--text-body); color: var(--color-text-secondary); }
+.hole-map-readout-divider { width: 1px; align-self: stretch; background: var(--color-divider); }
+.hole-map-readout-side { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; }
+.hole-map-accuracy-value {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
 }
-.edge-chip-value { font-size: var(--text-title); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
-.edge-chip-label { font-size: var(--text-caption); color: var(--color-text-secondary); }
-.hole-map-note { margin-top: var(--space-4); }
+.hole-map-accuracy-label { margin-top: 2px; font-size: var(--text-caption); color: var(--color-text-tertiary); }
+
+.hole-map-message {
+  flex-shrink: 0;
+  margin-top: var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+/* MapLibre paints its own attribution; keep it legible but quiet. */
+.hole-map-canvas .maplibregl-ctrl-attrib {
+  background: rgba(10, 13, 16, 0.6);
+  font-size: 10px;
+}
+.hole-map-canvas .maplibregl-ctrl-attrib a { color: rgba(245, 247, 248, 0.8); }
