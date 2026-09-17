@@ -2,6 +2,7 @@ import * as db from '../db.js';
 import { qs, qsa, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
 import { getClubQuickPicks } from '../setupPersonalization.js';
 import { openEndRoundSheet } from './home.js';
+import { setHoleEntryState, getHoleEntryState, clearHoleEntryState } from '../state.js';
 
 // Course Session / Hole Entry — docs/course-mode-spec.md §4.4, Reference C.
 //
@@ -25,6 +26,8 @@ const ICON_CLUB = '<path d="M16.5 3.5 9 15" /><ellipse cx="7.7" cy="16.8" rx="2.
 const ICON_CHIP = '<path d="M4 18c3-5 7-7 11-8" /><path d="M15 9.5 19 10l-1.5 3.5" /><circle cx="5" cy="19" r="1.4" />';
 const ICON_PUTT = '<path d="M12 4v11" /><ellipse cx="12" cy="18.5" rx="6" ry="2.2" /><circle cx="12" cy="15.4" r="2" />';
 const ICON_MINUS = '<path d="M5.5 12h13" />';
+const ICON_PIN = '<path d="M12 21s6.5-5.8 6.5-10.3a6.5 6.5 0 1 0-13 0C5.5 15.2 12 21 12 21Z" /><circle cx="12" cy="10.4" r="2.4" />';
+const ICON_CHEVRON = '<path d="M9 5.5 15.5 12 9 18.5" />';
 const ICON_PLUS = '<path d="M12 5.5v13" /><path d="M5.5 12h13" />';
 
 // Press-and-hold repeats after a short delay (§5.2). Long enough that a
@@ -69,9 +72,16 @@ export function renderCourseRound(root) {
   const holes = db.getHolesForRound(round.round_id);
   const played = new Set(holes.map((h) => h.hole_number));
 
-  // Resuming mid-round lands on the first unplayed hole, not back at hole 1
-  // (§5.3) — and on the last hole once everything has been played.
-  const current = firstUnplayed(round, played) ?? round.hole_count;
+  // A trip to the Hole Map and back returns to the hole the golfer was on,
+  // not to the first unplayed one — otherwise editing hole 3 mid-round and
+  // glancing at the map would dump them back on hole 7 (§14.4). The
+  // remembered value is in-memory only and scoped to this round, so a real
+  // resume after the app closed still lands on the first unplayed hole as
+  // §5.3 describes.
+  const remembered = getHoleEntryState(round.round_id);
+  const current = remembered?.holeNumber
+    ?? firstUnplayed(round, played)
+    ?? round.hole_count;
   renderHole(root, round.round_id, current);
 }
 
@@ -92,11 +102,20 @@ function renderHole(root, roundId, holeNumber) {
   // Working copy for this hole. A hole that has been played loads its saved
   // values (§5.5); an unplayed one opens at par with everything else at
   // zero, which is what makes the common hole a single tap.
+  // Anything the golfer touched is already in `stored` — hole entry
+  // autosaves every change. `remembered` covers the rest: a hole they
+  // opened, adjusted and then took to the map without a save ever landing,
+  // which has no record precisely so that looking at a hole never counts as
+  // playing it. Consumed once, so a later visit opens fresh.
+  const remembered = getHoleEntryState(roundId);
+  const carried = remembered?.holeNumber === holeNumber ? remembered.draft : null;
+  if (carried) clearHoleEntryState();
+
   const draft = {
-    strokes: stored?.strokes ?? def.par ?? 1,
-    clubs_used: [...(stored?.clubs_used ?? [])],
-    short_game_strokes: stored?.short_game_strokes ?? 0,
-    putts: stored?.putts ?? 0,
+    strokes: carried?.strokes ?? stored?.strokes ?? def.par ?? 1,
+    clubs_used: [...(carried?.clubs_used ?? stored?.clubs_used ?? [])],
+    short_game_strokes: carried?.short_game_strokes ?? stored?.short_game_strokes ?? 0,
+    putts: carried?.putts ?? stored?.putts ?? 0,
   };
 
   const holes = db.getHolesForRound(roundId);
@@ -107,9 +126,20 @@ function renderHole(root, roundId, holeNumber) {
   const isFinishing = nextHole === null;
 
   // Yardage and its separator are omitted when unknown — never "— yd" (§4.4).
+  // This is the SELECTED TEE's published yardage, snapshotted onto the round
+  // at Start Round — never a live GPS distance (§14.6).
   const parts = [];
   if (def.par != null) parts.push(`Par ${def.par}`);
   if (def.yardage != null) parts.push(`${def.yardage} yd`);
+
+  // §14.4: the pill appears only where meaningful mapped data exists for
+  // THIS hole — at minimum a green centre. Per-hole, not per-course: a
+  // course with 6 of 9 greens mapped shows it on those 6 only. Deliberately
+  // not "the course has some golf features in OSM": a hole whose green was
+  // never traced, or was traced but could not be associated to it, cannot
+  // produce a live yardage and so must not offer a map.
+  const green = db.getGreenForHole(round.course_id, holeNumber);
+  const hasMapForHole = !!green?.centroid;
 
   root.innerHTML = `
     <div class="screen">
@@ -129,8 +159,15 @@ function renderHole(root, roundId, holeNumber) {
       <div class="scroll">
         <div class="card hole-card">
           <div class="hole-identity">
-            <div class="hole-number">Hole ${holeNumber} of ${round.hole_count}</div>
-            ${parts.length ? `<div class="hole-meta">${parts.join(' &bull; ')}</div>` : ''}
+            <div class="hole-identity-text">
+              <div class="hole-number">Hole ${holeNumber} of ${round.hole_count}</div>
+              ${parts.length ? `<div class="hole-meta">${parts.join(' &bull; ')}</div>` : ''}
+            </div>
+            ${hasMapForHole ? `
+              <button class="view-map-pill" id="viewMapBtn" aria-label="View the map for hole ${holeNumber}">
+                ${icon(ICON_PIN)}<span>View Map</span>
+                <svg class="view-map-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_CHEVRON}</svg>
+              </button>` : ''}
           </div>
 
           ${stepperHtml({ id: 'scoreStepper', value: draft.strokes, min: 1, size: 'lg', caption: 'STROKES' })}
@@ -348,6 +385,7 @@ function renderHole(root, roundId, holeNumber) {
   refreshHint();
 
   qs('#backBtn', root).addEventListener('click', () => {
+    clearHoleEntryState();
     // Leaving pauses rather than ends — the round is resumable from Home,
     // and every completed hole is already persisted.
     db.pauseRound(roundId);
@@ -363,13 +401,27 @@ function renderHole(root, roundId, holeNumber) {
     if (holeNumber > 1) renderHole(root, roundId, holeNumber - 1);
   });
 
+  // The one new control (§14.4). It hands the current hole and the current
+  // draft to the map and navigates — it does NOT save, because saving here
+  // would turn a hole the golfer only glanced at into a played one.
+  qs('#viewMapBtn', root)?.addEventListener('click', () => {
+    setHoleEntryState(roundId, holeNumber, draft);
+    location.hash = `#/course/map/${holeNumber}`;
+  });
+
   qs('#saveHoleBtn', root).addEventListener('click', () => {
     if (!persist()) return; // storage failed — stay put rather than lose the hole
     if (isFinishing) { finishRound(); return; }
+    // The hole just saved is behind us; carrying its draft forward would
+    // seed the next hole with the last one's numbers.
+    clearHoleEntryState();
     renderHole(root, roundId, nextHole);
   });
 
   function finishRound() {
+    // Whatever hole the golfer was on stops being a place to return to the
+    // moment the round ends, and must not leak into the next round.
+    clearHoleEntryState();
     const currentRound = db.getRound(roundId);
     if (!currentRound) { location.hash = '#/home'; return; }
     // A round with no holes played is discarded rather than saved as an

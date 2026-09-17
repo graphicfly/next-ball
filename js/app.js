@@ -11,6 +11,7 @@ import { renderCourseSelect } from './screens/courseSelect.js';
 import { renderCourseSetup } from './screens/courseSetup.js';
 import { renderCourseEdit } from './screens/courseEdit.js';
 import { renderCourseRound } from './screens/courseRound.js';
+import { renderHoleMap } from './screens/holeMap.js';
 import { renderRoundSummary } from './screens/roundSummary.js';
 import { renderRoundExplore } from './screens/roundExplore.js';
 import { renderPracticePlan } from './screens/practicePlan.js';
@@ -45,6 +46,7 @@ const routes = [
   { pattern: /^#\/course\/setup$/, render: () => renderCourseSetup(root) },
   { pattern: /^#\/course\/edit$/, render: () => renderCourseEdit(root) },
   { pattern: /^#\/course\/round$/, render: () => renderCourseRound(root) },
+  { pattern: /^#\/course\/map\/(\d+)$/, render: (m) => renderHoleMap(root, m[1]) },
   { pattern: /^#\/course\/summary\/([^/]+)$/, render: (m) => renderRoundSummary(root, m[1]) },
   { pattern: /^#\/course\/explore\/([^/]+)$/, render: (m) => renderRoundExplore(root, m[1]) },
   { pattern: /^#\/course\/plan\/([^/]+)$/, render: (m) => renderPracticePlan(root, m[1]) },

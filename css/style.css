@@ -3283,3 +3283,64 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 .coverage-yards { flex: 1; font-variant-numeric: tabular-nums; color: var(--color-text-secondary); }
 .coverage-green { flex-shrink: 0; font-size: var(--text-caption); color: var(--color-text-tertiary); }
 .coverage-green.on { color: var(--color-accent); }
+
+/* ---------- View Map pill + Hole Map readout (§14.4, §14.5) ---------- */
+
+/* The pill sits at the hole card's top-right, beside the identity block —
+   one compact control, deliberately the only GPS affordance on the fast
+   scoring screen (§14.4). */
+.hole-identity { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.hole-identity-text { min-width: 0; }
+.view-map-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: var(--tap-min);
+  padding: 8px var(--space-3);
+  border-radius: 999px;
+  border: 1.5px solid var(--color-divider);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.view-map-pill svg { width: 16px; height: 16px; color: var(--color-accent); }
+.view-map-chevron { width: 14px !important; height: 14px !important; color: var(--color-text-tertiary) !important; }
+.view-map-pill:active { transform: scale(0.97); }
+.view-map-pill:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+.hole-map-published {
+  font-size: var(--text-body);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+.hole-map-readout { padding: var(--space-5) var(--space-4); text-align: center; }
+.hole-map-primary { display: flex; align-items: baseline; justify-content: center; gap: var(--space-2); }
+.hole-map-distance {
+  font-size: var(--text-display-lg, 3rem);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.hole-map-distance-label { font-size: var(--text-body-lg); color: var(--color-text-secondary); }
+/* Accuracy is always visible and always secondary — never accent, never
+   red. Poor accuracy is a condition, not an error (§14.8). */
+.hole-map-accuracy { margin-top: var(--space-3); font-size: var(--text-caption); color: var(--color-text-secondary); }
+
+.hole-map-edges { display: flex; gap: var(--space-3); margin-top: var(--space-3); }
+.edge-chip {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-3);
+  border-radius: var(--radius-md, 12px);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+}
+.edge-chip-value { font-size: var(--text-title); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.edge-chip-label { font-size: var(--text-caption); color: var(--color-text-secondary); }
+.hole-map-note { margin-top: var(--space-4); }
