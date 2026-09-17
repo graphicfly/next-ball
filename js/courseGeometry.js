@@ -435,3 +435,79 @@ export async function loadCourseGeometry(course, opts = {}) {
   }
   return { status: GEOMETRY_STATUS.OK, geometry };
 }
+
+// ---------- Coverage (§14.7) ----------
+
+// What a course can actually support, as four internal levels. The UI never
+// shows these words — §14.7's own wording is "GPS map available" or nothing
+// — but every screen decision (which stat cells appear, whether View Course
+// Map exists, what the status row says) is made from one of them, so they
+// are named rather than re-derived ad hoc at each call site.
+export const COVERAGE = {
+  // Greens AND per-tee yardages: the full Reference C experience.
+  TRACED: 'traced',
+  // Green coordinates but no tee yardages — live distances work, published
+  // per-tee yardages do not. Also where a golfer-captured green lands
+  // (§14.13), which is a single point and can never be more than this.
+  GREENS_ONLY: 'greens_only',
+  // Par and possibly yardages, no green coordinates. Everything except the
+  // map works exactly as it did in V1.
+  SCORECARD: 'scorecard',
+  // Nothing beyond what the golfer typed. A manual course starts here and
+  // is fully first-class (§14.7 D).
+  UNMAPPED: 'unmapped',
+};
+
+// Pure over a stored course record — no db access, no network, so a caller
+// can evaluate a course it has only just fetched.
+//
+// `hasMap` is deliberately its own flag rather than `level === TRACED`:
+// §14.2 gates the GPS cell and the View Course Map row on "green
+// coordinates exist for >= 1 hole", which is true at GREENS_ONLY too.
+export function courseCoverage(course) {
+  const geometry = course?.geometry || null;
+  const holeCount = Number.isFinite(course?.hole_count) ? course.hole_count : 0;
+  const holes = geometry?.holes || [];
+
+  const greensAssociated = holes.filter((h) => h.green).length;
+  // Greens that no hole line claimed still count. §14.7 rule 2: a course
+  // with greens and no golf=hole features — Burke Lake has 18 of them — is
+  // usable, because the green is resolved at play time from the golfer's
+  // own position, which is reliable precisely because they are standing on
+  // the hole they are playing. Capped at the hole count so the status row
+  // can never read "18 of 9".
+  const greensOnProperty = (geometry?.greens || []).length;
+  const greensMapped = greensAssociated > 0
+    ? greensAssociated
+    : Math.min(greensOnProperty, holeCount || greensOnProperty);
+  const holesWithTeeYardage = holes.filter((h) => h.tees && h.tees.length).length;
+  const teeSets = Array.isArray(course?.tees) ? course.tees : [];
+
+  // Yardage can exist without any geometry at all — a provider or the
+  // golfer may have supplied per-hole yardages on hole_defs.
+  const hasYardages = teeSets.length > 0
+    || (course?.hole_defs || []).some((d) => d.yardage != null);
+
+  let level;
+  if (greensMapped > 0 && holesWithTeeYardage > 0) level = COVERAGE.TRACED;
+  else if (greensMapped > 0) level = COVERAGE.GREENS_ONLY;
+  else if (hasYardages) level = COVERAGE.SCORECARD;
+  else level = COVERAGE.UNMAPPED;
+
+  return {
+    level,
+    holeCount,
+    greensMapped,
+    greensAssociated,
+    greensOnProperty,
+    holesWithTeeYardage,
+    hasYardages,
+    teeSets,
+    // The one gate §14.2 and §14.7 C actually use. Being in OSM is not the
+    // question — having a green coordinate is.
+    hasMap: greensMapped > 0,
+    // Whether a lookup has already happened, so a caller can tell "no
+    // mapping" from "not looked up yet" without re-querying.
+    checked: !!course?.geometry_checked_at,
+  };
+}

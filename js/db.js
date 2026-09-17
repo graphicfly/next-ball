@@ -1225,6 +1225,12 @@ function normalizeCourseGeometry(course) {
   // A lookup that found nothing is worth remembering too — otherwise every
   // visit to an unmapped course re-queries a service that already answered.
   if (course.geometry_checked_at === undefined) course.geometry_checked_at = null;
+  // When the golfer last authored this course's pars, by playing a round
+  // here or editing them. Null means hole_defs still holds the template
+  // floor, which is indistinguishable from a real par by value alone —
+  // normalizeHoleDefs fills every hole whether or not anyone chose it. A
+  // traced par may pre-fill only while this is null (§14.7).
+  if (course.pars_set_at === undefined) course.pars_set_at = null;
   return course;
 }
 
@@ -1296,6 +1302,76 @@ export function getSelectedTee(courseId) {
 // The green a hole can measure to, from either source. Provider geometry and
 // a green the golfer captured are deliberately distinguishable by `source`
 // (§14.13.5) — never present a captured point as surveyed data.
+// The hole definitions a round should snapshot: par from what the golfer has
+// set (or the template floor, §11.5), yardage from the selected tee.
+//
+// §14.12.3 keeps the round's shape unchanged — one `hole_defs` array with a
+// single yardage — so §6, §9 and roundAnalysis.js see exactly what they
+// always have. Selecting a tee chooses which set of numbers is copied in;
+// it never reaches the round's structure, and never touches green geometry.
+//
+// Yardage precedence, per §14.12.3 ("a golfer-entered yardage always wins
+// over a computed one"):
+//   1. the course's own hole_defs yardage, where one exists
+//   2. the selected tee's measured yardage
+//   3. null — never invented, so display omits it rather than showing "— yd"
+export function resolveHoleDefs(courseId, { holeCount, teeId } = {}) {
+  const course = getCourse(courseId);
+  const count = normalizeHoleCount(holeCount ?? course?.hole_count);
+  const template = defaultHoleDefs(count);
+  if (!course) return template;
+
+  normalizeCourseGeometry(course);
+  const tee = teeId != null
+    ? course.tees.find((t) => t.tee_id === teeId)
+    : course.tees.find((t) => t.tee_id === course.selected_tee_id);
+
+  // A traced par pre-fills ONLY while the golfer has not set their own.
+  // §14.7: par from a trace is an enhancement, never a replacement for
+  // §11.5's golfer-entered floor. Once pars_set_at exists they win, because
+  // the golfer stood on the hole and OSM did not.
+  const tracedPars = course.pars_set_at ? null : course.geometry?.holes;
+
+  return template.map((d, i) => {
+    const own = course.hole_defs?.find((c) => c.hole_number === d.hole_number);
+    const traced = tracedPars?.find((h) => h.hole_number === d.hole_number)?.par;
+    const teeYardage = tee?.hole_yardages?.[i];
+    return {
+      hole_number: d.hole_number,
+      par: course.pars_set_at ? (own?.par ?? d.par) : (Number.isFinite(traced) ? traced : (own?.par ?? d.par)),
+      yardage: own?.yardage ?? (Number.isFinite(teeYardage) ? teeYardage : null),
+    };
+  });
+}
+
+// Edit Course Info's save. Distinct from upsertCourse because it records
+// that these pars are the golfer's, which is what stops a traced par from
+// pre-filling over them afterwards.
+export function setCoursePars(courseId, { name, hole_count, hole_defs } = {}) {
+  const course = getCourse(courseId);
+  if (!course) return null;
+  normalizeCourseGeometry(course);
+  if (typeof name === 'string' && name.trim()) course.name = name.trim();
+  if (hole_count !== undefined) course.hole_count = normalizeHoleCount(hole_count);
+  if (hole_defs !== undefined) {
+    course.hole_defs = normalizeHoleDefs(hole_defs, course.hole_count);
+    course.pars_set_at = nowISO();
+  }
+  course.updated_at = nowISO();
+  saveIndex();
+  return course;
+}
+
+// Total published yardage for a tee, over the holes actually being played.
+// Returns null when nothing is known, so the Total Yards cell is omitted
+// rather than rendered as "— yd" (§14.2).
+export function totalYardsForTee(courseId, { holeCount, teeId } = {}) {
+  const defs = resolveHoleDefs(courseId, { holeCount, teeId });
+  const known = defs.filter((d) => Number.isFinite(d.yardage));
+  if (!known.length) return null;
+  return known.reduce((t, d) => t + d.yardage, 0);
+}
+
 export function getGreenForHole(courseId, holeNumber) {
   const geometry = getCourseGeometry(courseId);
   const hole = geometry?.holes?.find((h) => h.hole_number === holeNumber);
@@ -1399,7 +1475,12 @@ export function recordCoursePlayed(courseId, { hole_count, hole_defs } = {}) {
   const course = getCourse(courseId);
   if (!course) return null;
   if (hole_count !== undefined) course.hole_count = normalizeHoleCount(hole_count);
-  if (hole_defs !== undefined) course.hole_defs = normalizeHoleDefs(hole_defs, course.hole_count);
+  if (hole_defs !== undefined) {
+    course.hole_defs = normalizeHoleDefs(hole_defs, course.hole_count);
+    // Played with these pars, so they are the golfer's from here on and a
+    // later trace must not overwrite them.
+    normalizeCourseGeometry(course).pars_set_at = nowISO();
+  }
   course.play_count = (course.play_count || 0) + 1;
   course.last_played_at = nowISO();
   course.updated_at = nowISO();
@@ -1436,6 +1517,13 @@ export function createRound(fields = {}) {
     // known before a hole is played, since the score stepper opens at par
     // (§4.4) — that is why it lives here rather than only on played holes.
     hole_defs: normalizeHoleDefs(fields.hole_defs, holeCount),
+    // Which tee the snapshotted yardages came from (§14.3). Recorded on the
+    // round, not read back through the course, so History and Explore Round
+    // can still say what a round was played off after the course has been
+    // re-fetched, renamed, or its tee sets replaced. Null for a course that
+    // publishes no tees, which is most of them.
+    tee_id: fields.tee_id ?? null,
+    tee_name: fields.tee_name ?? null,
     date: fields.date || todayLocalDateString(),
     start_time: fields.start_time || nowLocalTimeString(),
     end_time: null,

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v64';
+const CACHE_NAME = 'nextball-v65';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -6,6 +6,8 @@ const PRECACHE_URLS = [
   './css/style.css',
   './js/app.js',
   './js/db.js',
+  './js/geo.js',
+  './js/courseGeometry.js',
   './js/state.js',
   './js/version.js',
   './js/weather.js',
@@ -34,6 +36,7 @@ const PRECACHE_URLS = [
   './js/screens/yourGroove.js',
   './js/screens/courseSelect.js',
   './js/screens/courseSetup.js',
+  './js/screens/courseEdit.js',
   './js/screens/courseRound.js',
   './js/screens/roundSummary.js',
   './js/screens/roundExplore.js',

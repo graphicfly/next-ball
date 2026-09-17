@@ -3179,3 +3179,107 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 @media (min-width: 700px) {
   #app { max-width: 620px; }
 }
+
+/* ---------- Course Details (§14.2, Reference A) ---------- */
+
+/* The identity card: flag badge, name and place, then a hairline and the
+   stat row beneath it. One card, not two, because the stats describe the
+   course the badge names. */
+.course-identity-card { padding: var(--space-4); margin-bottom: var(--space-3); }
+.course-identity { display: flex; align-items: center; gap: var(--space-4); }
+.course-identity-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.course-identity-name {
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.course-identity-place { margin-top: 2px; font-size: var(--text-body); color: var(--color-text-secondary); }
+
+/* Cells are omitted, never blanked, so this row legitimately holds two,
+   three or four and must divide evenly at any of those counts. */
+.course-stat-row {
+  display: flex;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-divider);
+}
+.course-stat {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  text-align: center;
+}
+.course-stat + .course-stat { border-left: 1px solid var(--color-divider); }
+.course-stat-icon { color: var(--color-text-secondary); height: 20px; }
+.course-stat-icon svg { width: 20px; height: 20px; }
+.course-stat-value {
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.course-stat-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+  line-height: 1.2;
+}
+
+/* The trailing value on a detail row — the selected tee's name. Sits
+   between the text block and the chevron, and gives up width before the
+   title does. */
+.course-row-value {
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: var(--text-body-lg);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Start Round then Edit Course Info, pinned below the scroll area so the
+   primary action is always reachable without scrolling. */
+.course-details-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+.course-details-actions .btn-hero { margin: 0; }
+
+/* Tee options in the bottom sheet: name on the left, total on the right. */
+.tee-option { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.tee-option.selected { border-color: var(--color-accent); color: var(--color-accent); }
+.tee-option-yards { font-variant-numeric: tabular-nums; color: var(--color-text-secondary); }
+.tee-option.selected .tee-option-yards { color: var(--color-accent); }
+
+/* Per-hole coverage list behind the status row. */
+.coverage-list { max-height: 44vh; overflow-y: auto; overflow-x: hidden; }
+.coverage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--text-body);
+}
+.coverage-row:last-child { border-bottom: 0; }
+.coverage-hole {
+  flex-shrink: 0;
+  width: 26px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+}
+.coverage-par { flex-shrink: 0; width: 56px; }
+.coverage-yards { flex: 1; font-variant-numeric: tabular-nums; color: var(--color-text-secondary); }
+.coverage-green { flex-shrink: 0; font-size: var(--text-caption); color: var(--color-text-tertiary); }
+.coverage-green.on { color: var(--color-accent); }
