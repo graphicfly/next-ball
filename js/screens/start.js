@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, toast, todayLocalDate, nowLocalTime, escapeHtml, presentSheet } from '../ui.js';
+import { qs, qsa, toast, todayLocalDate, nowLocalTime, escapeHtml, presentSheet, commitOnce } from '../ui.js';
 import { enableWakeLock } from '../wakeLock.js';
 import { startWeatherTracking } from '../sessionWeather.js';
 import { startLocationResolution } from '../sessionLocation.js';
@@ -276,9 +276,13 @@ export function renderStart(root) {
     });
     qs('#notesInput', root).addEventListener('input', (e) => { state.notes = e.target.value; });
 
-    qs('#startNowBtn', root).addEventListener('click', () => {
-      if (!state.club) { toast('Select a club'); return; }
-      if (!state.ballCount || state.ballCount < 1) { toast('Enter a valid ball count'); return; }
+    // Latched: a double tap used to start three sessions, because the hash
+    // change that leaves this screen lands long after the second tap.
+    qs('#startNowBtn', root).addEventListener('click', commitOnce(() => {
+      // `false` re-arms the button — nothing was started, and the golfer
+      // will fix the field and tap again.
+      if (!state.club) { toast('Select a club'); return false; }
+      if (!state.ballCount || state.ballCount < 1) { toast('Enter a valid ball count'); return false; }
 
       const session = db.createSession({
         date, start_time: time,
@@ -320,7 +324,7 @@ export function renderStart(root) {
       startWeatherTracking(session.session_id);
       startLocationResolution(session.session_id);
       location.hash = '#/active';
-    });
+    }));
   }
 
   function openClubSheet() {

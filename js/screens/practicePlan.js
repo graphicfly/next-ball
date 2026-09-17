@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
+import { qs, escapeHtml, toast, trapSheetFocus, presentSheet, commitOnce } from '../ui.js';
 import { practiceFocus, isRangePracticable } from '../roundAnalysis.js';
 import { lessonPracticeFocus } from '../lessonPlan.js';
 import { setPendingPlanId } from '../state.js';
@@ -141,14 +141,14 @@ export function renderPracticePlan(root, source) {
 
   qs('#deletePlanBtn', root)?.addEventListener('click', () => openDeletePlanSheet(root, saved));
 
-  qs('#savePlanBtn', root)?.addEventListener('click', () => {
+  qs('#savePlanBtn', root)?.addEventListener('click', commitOnce(() => {
     const record = db.createPlan(src.origin, plan);
-    if (!record) { toast('Could not save this plan'); return; }
+    if (!record) { toast('Could not save this plan'); return false; }
     toast('Practice plan saved');
     // Re-render into the saved state so the confirmation is visible and the
     // plan cannot be saved twice.
     renderPracticePlan(root, source);
-  });
+  }));
 }
 
 // Deleting a plan resolves it to `dismissed` rather than erasing it: the

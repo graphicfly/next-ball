@@ -151,6 +151,41 @@ export function presentSheet(backdrop) {
   return true;
 }
 
+// Wraps a handler that COMMITS something — saves a shot, starts a session,
+// creates a lesson — so that the second and third taps of an accidental
+// double tap do nothing.
+//
+// Why this is needed at all: every one of these handlers navigates away
+// immediately, which looks like protection and is not. The hash change and
+// its re-render are asynchronous, so two taps 80ms apart both run against
+// the screen that is still on screen, and two records exist before either
+// navigation lands. Shot entry is worse still: it waits 180ms before
+// committing so the tapped option gets a frame to paint, which widens the
+// window rather than closing it. Three taps on Miss logged three shots.
+//
+// A latch, not a debounce: the second tap is discarded rather than delayed,
+// because a golfer tapping twice means one shot, not one-shot-later.
+//
+// The latch is per-binding. Every screen rebuilds its handlers on render,
+// so a fresh render is naturally re-armed and nothing has to reset it. A
+// handler that declines to commit — a validation failure, a cancelled
+// confirm — returns `false` to stay armed, so a corrected second attempt
+// still works.
+//
+// This is the same shape as presentSheet()'s guard above: solved once, at
+// the point every caller already passes through, rather than left to each
+// of the app's commit buttons to remember.
+export function commitOnce(fn) {
+  let spent = false;
+  return function guarded(...args) {
+    if (spent) return undefined;
+    spent = true;
+    const result = fn.apply(this, args);
+    if (result === false) spent = false;
+    return result;
+  };
+}
+
 // Traps Tab/Shift+Tab within `container` and calls `onClose` on Escape,
 // while `container` is open. Returns a cleanup function to call when the
 // dialog closes by any other means (so the listener doesn't leak). Used by

@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, escapeHtml, toast, todayLocalDate } from '../ui.js';
+import { qs, qsa, escapeHtml, toast, todayLocalDate, commitOnce } from '../ui.js';
 
 // Add / Edit Lesson — docs/lesson-spec.md §2.
 //
@@ -125,12 +125,12 @@ export function renderLessonEntry(root, lessonId = null) {
   const back = () => { location.hash = isEdit ? `#/lesson/${existing.lesson_id}` : '#/history'; };
   qs('#backBtn', root).addEventListener('click', back);
 
-  qs('#saveLessonBtn', root).addEventListener('click', () => {
+  qs('#saveLessonBtn', root).addEventListener('click', commitOnce(() => {
     // An empty cue 1 with cue 2 filled is still a valid lesson — db
     // renumbers, so the golfer is never told off for leaving a gap.
     const entered = cues.filter((t) => t.trim());
-    if (!date) { toast('A lesson needs a date'); return; }
-    if (!entered.length) { toast('A lesson needs at least one cue'); return; }
+    if (!date) { toast('A lesson needs a date'); return false; }
+    if (!entered.length) { toast('A lesson needs at least one cue'); return false; }
 
     const fields = { date, instructor_name: instructor, cues: entered, drills, notes };
 
@@ -140,7 +140,7 @@ export function renderLessonEntry(root, lessonId = null) {
       return;
     }
     const lesson = db.createLesson(fields);
-    if (!lesson) { toast('Could not save this lesson'); return; }
+    if (!lesson) { toast('Could not save this lesson'); return false; }
     location.hash = `#/lesson/${lesson.lesson_id}`;
-  });
+  }));
 }

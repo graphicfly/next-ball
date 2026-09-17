@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, escapeHtml, toast, trapSheetFocus, presentSheet } from '../ui.js';
+import { qs, qsa, escapeHtml, toast, trapSheetFocus, presentSheet, commitOnce } from '../ui.js';
 import { getClubQuickPicks } from '../setupPersonalization.js';
 import { openEndRoundSheet } from './home.js';
 import { setHoleEntryState, getHoleEntryState, clearHoleEntryState } from '../state.js';
@@ -409,14 +409,17 @@ function renderHole(root, roundId, holeNumber) {
     location.hash = `#/course/map/${holeNumber}`;
   });
 
-  qs('#saveHoleBtn', root).addEventListener('click', () => {
-    if (!persist()) return; // storage failed — stay put rather than lose the hole
+  // Latched so a double tap cannot skip a hole: the second tap used to run
+  // against the hole still on screen and advance twice. A failed write
+  // re-arms it, since nothing moved.
+  qs('#saveHoleBtn', root).addEventListener('click', commitOnce(() => {
+    if (!persist()) return false; // storage failed — stay put rather than lose the hole
     if (isFinishing) { finishRound(); return; }
     // The hole just saved is behind us; carrying its draft forward would
     // seed the next hole with the last one's numbers.
     clearHoleEntryState();
     renderHole(root, roundId, nextHole);
-  });
+  }));
 
   function finishRound() {
     // Whatever hole the golfer was on stops being a place to return to the

@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, cap, toast, presentSheet } from '../ui.js';
+import { qs, qsa, cap, toast, presentSheet, commitOnce } from '../ui.js';
 import { getDraft, setDraftField, clearDraft, getFlowReturn } from '../state.js';
 import { openEndSessionSheet } from './home.js';
 
@@ -364,7 +364,11 @@ export function renderShotEntry(root, step) {
 
   qs('#enterCustomBtn', root)?.addEventListener('click', () => openCustomDistanceSheet(session, draft, root));
 
-  const selectOption = (value) => {
+  // Latched for the life of this render: choosing an option ends this step
+  // whichever branch it takes, so a second tap has nothing left to say. It
+  // guards the terminal steps — Miss and Distance both write a shot — and
+  // also stops a fast tap on two different options queueing two timers.
+  const selectOption = commitOnce((value) => {
     // Mark the tapped option selected immediately so its "touched" color
     // (e.g. Direction's arrow turning green) actually gets a frame to paint
     // before the screen moves on — advancing straight to the next hash left
@@ -393,7 +397,7 @@ export function renderShotEntry(root, step) {
         location.hash = `#/log/${nextStep}`;
       }
     }, 180);
-  };
+  });
 
   qsa(OPTION_SELECTORS[step], root).forEach((btn) => {
     btn.addEventListener('click', () => selectOption(btn.dataset.value));

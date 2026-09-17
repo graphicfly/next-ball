@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { qs, qsa, escapeHtml, toast } from '../ui.js';
+import { qs, qsa, escapeHtml, toast, commitOnce } from '../ui.js';
 import { getPendingCourseId } from '../state.js';
 
 // Edit Course Info — docs/course-mode-spec.md §14.2.
@@ -108,9 +108,9 @@ export function renderCourseEdit(root) {
   const back = () => { location.hash = '#/course/setup'; };
   qs('#backBtn', root).addEventListener('click', back);
 
-  qs('#saveCourseBtn', root).addEventListener('click', () => {
+  qs('#saveCourseBtn', root).addEventListener('click', commitOnce(() => {
     const trimmed = name.trim();
-    if (!trimmed) { toast('A course needs a name'); return; }
+    if (!trimmed) { toast('A course needs a name'); return false; }
 
     // Remembered on the course, so the next round here is pre-filled and
     // the golfer simply taps Start Round (§4.3). Yardages already on the
@@ -130,7 +130,7 @@ export function renderCourseEdit(root) {
       hole_defs: holeDefs,
     });
     back();
-  });
+  }));
 }
 
 function parsFor(courseId, holeCount) {
