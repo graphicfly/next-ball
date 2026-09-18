@@ -259,10 +259,30 @@ export function renderHome(root) {
 
       ${planRowHtml}
       ${setupLineHtml}
-      <div class="home-build-tag tiny center">${BUILD_VERSION}</div>
+      <div class="home-build-tag tiny center" id="buildTag">${BUILD_VERSION}</div>
       </div>
     </div>
   `;
+
+  // TEMPORARY (V4.3 Phase 1 validation). An installed PWA has no address
+  // bar, so an unlinked development route is unreachable from inside it —
+  // which is exactly where the media tier has to be validated, since
+  // storage persistence is granted differently for installed apps.
+  //
+  // Five taps on the build version. Deliberately obscure rather than
+  // hidden-in-code: nothing is discoverable by accident, and it is one line
+  // to remove along with the dev route and screen.
+  let buildTaps = 0;
+  let buildTapTimer = null;
+  qs('#buildTag', root)?.addEventListener('click', () => {
+    buildTaps += 1;
+    clearTimeout(buildTapTimer);
+    buildTapTimer = setTimeout(() => { buildTaps = 0; }, 2000);
+    if (buildTaps >= 5) {
+      buildTaps = 0;
+      location.hash = '#/dev/media';
+    }
+  });
 
   const startRangeSession = () => {
     if (hasDefaults) startWithDefaults(settings);

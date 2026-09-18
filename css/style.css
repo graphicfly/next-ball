@@ -2255,7 +2255,16 @@ p { color: var(--color-text-secondary); line-height: var(--leading-normal); }
 
 /* ---------- About / brand block (Settings) ---------- */
 
-.home-build-tag { color: var(--color-text-tertiary); margin-top: var(--space-4); }
+.home-build-tag {
+  color: var(--color-text-tertiary);
+  margin-top: var(--space-4);
+  /* A tap target only because the dev route needs one (see home.js). The
+     cursor and tap highlight stay suppressed so it still reads as a label. */
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
 
 .about-block { text-align: center; padding: var(--space-6) 0 var(--space-4); }
 .about-block .brand-hero { font-size: 1.75rem; }
