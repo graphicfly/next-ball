@@ -4,3 +4,11 @@
 deploy/
 z_frames/
 direction pie chart/
+
+# Swing Lab test footage. A single clip is ~100 MB, and committing one to a
+# public repo means a history rewrite to remove it — which is exactly what
+# happened to the docs. Import test videos from Photos; never store them here.
+*.mov
+*.mp4
+*.webm
+*.m4v
