@@ -78,4 +78,15 @@ describe('Service worker — the caching predicate', () => {
   test('the precache still populates at install, so offline never depends on these rules', () => {
     assert.match(SRC, /cache\.addAll\(PRECACHE_URLS\)/);
   });
+
+  test('user media is never precached — only the modules that manage it', () => {
+    // Swing video lives in IndexedDB and plays from a Blob URL, which never
+    // reaches the service worker. What IS precached is application code.
+    assert.match(SRC, /'\.\/js\/media\.js'/);
+    assert.match(SRC, /'\.\/js\/swingMedia\.js'/);
+    // Nothing that looks like a stored video may appear in the precache.
+    const precache = SRC.match(/const PRECACHE_URLS = \[([\s\S]*?)\];/)[1];
+    assert.doesNotMatch(precache, /\.(mp4|mov|webm|m4v)/i);
+    assert.doesNotMatch(precache, /swing\//);
+  });
 });

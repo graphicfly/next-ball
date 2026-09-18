@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v76';
+const CACHE_NAME = 'nextball-v77';
 // NOTE: vendor/maplibre is deliberately NOT precached (§14.5). At 1.01 MB it
 // is larger than the entire rest of the app, for a screen half of all
 // courses cannot show — precaching it would roughly double a fresh install.
@@ -25,6 +25,13 @@ const PRECACHE_URLS = [
   './js/sessionAnalysis.js',
   './js/roundAnalysis.js',
   './js/lessonPlan.js',
+  // Swing Lab media tier (V4.3 Phase 1). These are APPLICATION modules and
+  // are precached like any other. User media is not: swing video lives in
+  // IndexedDB and is played from a Blob URL, which never reaches this
+  // service worker at all.
+  './js/media.js',
+  './js/mediaMeta.js',
+  './js/swingMedia.js',
   './js/rangeCourseInsights.js',
   './js/sessionStory.js',
   './js/summarySections.js',
@@ -52,6 +59,7 @@ const PRECACHE_URLS = [
   './js/screens/practicePlan.js',
   './js/screens/lessonEntry.js',
   './js/screens/lessonSummary.js',
+  './js/screens/devMedia.js',
   './js/screens/trends.js',
   './js/screens/settings.js',
   './js/screens/locationSheet.js',

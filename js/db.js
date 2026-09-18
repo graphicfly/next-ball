@@ -212,16 +212,20 @@ function uuid() {
 // ever rewritten or migrated in place. Bumped 2 -> 3 when Course Mode's
 // rounds/courses arrived, 3 -> 4 when courses gained cached GPS geometry and
 // tee sets (§14), and 4 -> 5 when lessons and the Active Swing Focus
-// arrived (lesson-spec.md §2, §3).
+// arrived (lesson-spec.md §2, §3), and 5 -> 6 when Swing Lab's video
+// metadata arrived (swing-lab-spec.md §20.1).
 function defaultIndex() {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     sessions: [],
     goals: [],
     rounds: [],
     courses: [],
     practice_plans: [],
     lessons: [],
+    // Metadata only. The video bytes live in the media tier (js/media.js),
+    // and this record deliberately outlives them — see deleteSwingVideo.
+    swing_videos: [],
     // active_swing_focus is a POINTER at a lesson's cue, not a copy of it —
     // see setActiveSwingFocus. Null when no focus is set, which is the
     // state every install starts in and the state a golfer can return to.
@@ -273,6 +277,13 @@ function normalizeIndexShape(idx) {
     if (!Array.isArray(l.topics)) l.topics = [];
     if (!Array.isArray(l.video_ids)) l.video_ids = [];
     if (typeof l.notes !== 'string') l.notes = '';
+  }
+  // Swing Lab metadata, added in V4.3. Same normalize-on-load treatment as
+  // every collection before it.
+  if (!Array.isArray(idx.swing_videos)) idx.swing_videos = [];
+  for (const v of idx.swing_videos) {
+    if (!v.camera_view) v.camera_view = 'unknown';
+    if (!v.media_state) v.media_state = 'present';
   }
   if (!idx.settings || typeof idx.settings !== 'object') idx.settings = {};
   if (idx.settings.active_swing_focus === undefined) idx.settings.active_swing_focus = null;
@@ -396,6 +407,10 @@ export function getDB() {
     holes,
     practice_plans: index.practice_plans,
     lessons: index.lessons,
+    // Metadata only — a JSON backup never carries video bytes. A restore on
+    // another device therefore produces records whose media is absent,
+    // which media_state already describes.
+    swing_videos: index.swing_videos,
     settings: index.settings,
   };
 }
@@ -1541,6 +1556,163 @@ export function recordCoursePlayed(courseId, { hole_count, hole_defs } = {}) {
 }
 
 
+// ----- Swing videos (docs/swing-lab-spec.md §20.1) -----
+//
+// METADATA ONLY. The bytes live in the media tier (js/media.js); this record
+// holds a `media_ref` pointing at them.
+//
+// The separation is the point. Browser storage is evictable, so the bytes
+// can disappear without warning — and when they do, the record survives and
+// says so (`media_state`) rather than becoming a reference to nothing
+// (lesson-spec.md §7.2). It is also what lets a future backend swap a local
+// key for a remote object reference without touching anything else
+// (backend-readiness.md §18).
+
+export const CAMERA_VIEWS = ['face_on', 'down_the_line', 'unknown'];
+
+// 'present'  bytes are in the media tier
+// 'missing'  the record exists, the bytes do not — eviction, a failed save,
+//            or a backup restored onto a different device
+export const MEDIA_STATES = ['present', 'missing'];
+
+function normalizeView(view) {
+  return CAMERA_VIEWS.includes(view) ? view : 'unknown';
+}
+
+// `media_ref` is required: a SwingVideo that names no media is not a video.
+// Everything else is optional, because at import time most of it is either
+// unknown or none of the app's business yet.
+// The id may be supplied. Import needs it BEFORE the record exists, because
+// the media key is built from it — see js/swingMedia.js.
+export function newSwingVideoId() { return uuid(); }
+
+export function createSwingVideo(fields = {}) {
+  if (!fields.media_ref) return null;
+  const index = loadIndex();
+  const ts = nowISO();
+  const record = {
+    swing_video_id: fields.swing_video_id || uuid(),
+    // When the swing was filmed, where that is knowable, falling back to
+    // when it entered the app. A golfer importing last week's range session
+    // is recording something that already happened.
+    captured_at: fields.captured_at || ts,
+    imported_at: ts,
+    club: fields.club || null,
+    camera_view: normalizeView(fields.camera_view),
+    original_filename: fields.original_filename || null,
+
+    // What the file is. Every one of these may be null, and null means
+    // UNKNOWN — never a default. §3.1 is explicit that 30 fps must not be
+    // assumed, and that applies to every field here.
+    duration_ms: fields.duration_ms ?? null,
+    // Container dimensions and presentation dimensions are both kept
+    // because they disagree on ordinary iPhone footage: the container
+    // stores 1920x1080 plus a rotation, the decoder hands back 1080x1920.
+    width: fields.width ?? null,
+    height: fields.height ?? null,
+    display_width: fields.display_width ?? null,
+    display_height: fields.display_height ?? null,
+    rotation_deg: fields.rotation_deg ?? null,
+    fps: fields.fps ?? null,
+    // iPhone records variable frame rate, so an average fps can be a number
+    // that lies. Recording the fact protects anything computed from timing.
+    variable_frame_rate: fields.variable_frame_rate ?? null,
+    frame_count: fields.frame_count ?? null,
+    size_bytes: fields.size_bytes ?? null,
+    container: fields.container || null,
+    codec: fields.codec || null,
+    mime: fields.mime || null,
+
+    media_ref: fields.media_ref,
+    media_state: 'present',
+    thumb_ref: fields.thumb_ref || null,
+
+    // Association only. Deleting a video must never cascade into these, and
+    // deleting one of these must never cascade into the video.
+    lesson_id: fields.lesson_id || null,
+    range_session_id: fields.range_session_id || null,
+    // A COPY of the Active Swing Focus, never a pointer (lesson-spec.md
+    // §5.2) — so correcting a lesson's wording later cannot rewrite what
+    // this swing was filmed under.
+    active_focus_snapshot: fields.active_focus_snapshot ?? null,
+
+    created_at: ts,
+    updated_at: ts,
+  };
+  index.swing_videos.push(record);
+  if (!saveIndex()) {
+    index.swing_videos.pop();
+    return null;
+  }
+  return record;
+}
+
+export function getSwingVideo(id) {
+  return loadIndex().swing_videos.find((v) => v.swing_video_id === id) || null;
+}
+
+// Newest first, by when the swing was filmed rather than when it was
+// imported — the same ordering History uses for lessons.
+export function listSwingVideos() {
+  return loadIndex().swing_videos.slice().sort((a, b) => {
+    const byCaptured = String(b.captured_at).localeCompare(String(a.captured_at));
+    return byCaptured !== 0 ? byCaptured : String(b.created_at).localeCompare(String(a.created_at));
+  });
+}
+
+export function updateSwingVideo(id, patch = {}) {
+  const record = getSwingVideo(id);
+  if (!record) return null;
+  const allowed = ['club', 'camera_view', 'lesson_id', 'range_session_id', 'media_state', 'thumb_ref', 'captured_at'];
+  for (const key of allowed) {
+    if (patch[key] === undefined) continue;
+    if (key === 'camera_view') record.camera_view = normalizeView(patch.camera_view);
+    else if (key === 'media_state') record.media_state = MEDIA_STATES.includes(patch.media_state) ? patch.media_state : record.media_state;
+    else record[key] = patch[key];
+  }
+  record.updated_at = nowISO();
+  saveIndex();
+  return record;
+}
+
+// Marks the bytes gone while keeping the record. Called when a read finds
+// nothing, which is how eviction is discovered — there is no event for it.
+export function markSwingVideoMissing(id) {
+  return updateSwingVideo(id, { media_state: 'missing' });
+}
+
+// Removes the RECORD and returns the media keys the caller must now delete.
+//
+// Records first, bytes second, deliberately. A crash between the two leaves
+// orphaned bytes, which are invisible and swept later (media.sweepOrphans);
+// the other order would leave a record pointing at nothing, which is a bug
+// the golfer can see. See js/swingMedia.js for the orchestration.
+export function deleteSwingVideo(id) {
+  const index = loadIndex();
+  const i = index.swing_videos.findIndex((v) => v.swing_video_id === id);
+  if (i === -1) return null;
+
+  const [removed] = index.swing_videos.splice(i, 1);
+  if (!saveIndex()) {
+    index.swing_videos.splice(i, 0, removed);
+    throw Object.assign(new Error('Failed to delete swing video'), { code: 'storage_error' });
+  }
+  return {
+    record: removed,
+    mediaRefs: [removed.media_ref, removed.thumb_ref].filter(Boolean),
+  };
+}
+
+// Every media key any record still points at. The input to orphan sweeping.
+export function allSwingMediaRefs() {
+  const refs = [];
+  for (const v of loadIndex().swing_videos) {
+    if (v.media_ref) refs.push(v.media_ref);
+    if (v.thumb_ref) refs.push(v.thumb_ref);
+  }
+  return refs;
+}
+
 // ----- Lessons (docs/lesson-spec.md §2) -----
 //
 // A record of formal instruction, and the only place in the app whose text
@@ -2380,6 +2552,7 @@ export function importFullDB(obj) {
     // Pre-V4.2 backups have no `lessons` key. Same treatment as every
     // collection added before it: absent means empty, not corrupt.
     lessons: Array.isArray(obj.lessons) ? obj.lessons : [],
+    swing_videos: Array.isArray(obj.swing_videos) ? obj.swing_videos : [],
     // Merged (not `obj.settings || defaultIndex().settings`) so an empty or
     // partial settings object — e.g. Settings' "Erase All Data" passing
     // `{}` deliberately — still ends up with every default field rather
