@@ -86,24 +86,41 @@ export function generateThumbnail(file, { maxEdge = THUMB_MAX_EDGE } = {}) {
 }
 
 // Import result shapes, so callers never parse an error string:
-//   { ok: true, video }
-//   { ok: false, reason: 'no_file' | 'too_large' | 'undecodable' | 'quota'
-//                       | 'write_failed' | 'record_failed', detail? }
+//   { ok: true, video, timings, thumbnail }
+//   { ok: false, reason, stage, detail? }
+//
+// `stage` names where a failure happened — selection, metadata, storage,
+// thumbnail — because "import failed" on a phone with a 100 MB file is not
+// actionable and "the write failed" is.
+//
+// `timings` is per-stage and always present. Phones are several times
+// slower than a desktop and the difference is not evenly distributed, so
+// the only way to know what to optimise is to measure the stages
+// separately. swing-lab-spec.md §20.2 records the same shape on analyses.
 export async function importSwingVideo(file, fields = {}) {
-  if (!file) return { ok: false, reason: 'no_file' };
+  const t0 = performance.now();
+  const timings = { metadataMs: null, roomCheckMs: null, writeMs: null, persistMs: null, thumbnailMs: null, recordMs: null, totalMs: null };
+  const since = (mark) => Math.round(performance.now() - mark);
+  const done = (result) => { timings.totalMs = since(t0); return { ...result, timings }; };
+
+  if (!file) return done({ ok: false, reason: 'no_file', stage: 'selection' });
   if (file.size > MAX_IMPORT_BYTES) {
-    return { ok: false, reason: 'too_large', detail: { sizeBytes: file.size, maxBytes: MAX_IMPORT_BYTES } };
+    return done({ ok: false, reason: 'too_large', stage: 'selection', detail: { sizeBytes: file.size, maxBytes: MAX_IMPORT_BYTES } });
   }
 
   // Ask the browser what it can actually decode. NOT canPlayType — real
   // iPhone HEVC reports "" there and plays perfectly.
+  const mMeta = performance.now();
   const meta = await readVideoMetadata(file);
-  if (!meta.ok) return { ok: false, reason: 'undecodable', detail: { cause: meta.reason } };
+  timings.metadataMs = since(mMeta);
+  if (!meta.ok) return done({ ok: false, reason: 'undecodable', stage: 'metadata', detail: { cause: meta.reason } });
 
   // Advisory: refuse before writing rather than fail halfway through.
+  const mRoom = performance.now();
   const room = await media.hasRoomFor(file.size);
+  timings.roomCheckMs = since(mRoom);
   if (room.known && !room.fits) {
-    return { ok: false, reason: 'quota', detail: room };
+    return done({ ok: false, reason: 'quota', stage: 'storage', detail: room });
   }
 
   // The id has to exist before the bytes, because the media key is built
@@ -112,24 +129,39 @@ export async function importSwingVideo(file, fields = {}) {
   const swingId = db.newSwingVideoId();
   const key = mediaKey(swingId);
 
+  const mWrite = performance.now();
   const write = await media.putMedia(key, file);
-  if (!write.ok) return { ok: false, reason: write.reason || 'write_failed', detail: write };
+  timings.writeMs = since(mWrite);
+  if (!write.ok) return done({ ok: false, reason: write.reason || 'write_failed', stage: 'storage', detail: write });
 
   // Persistence is requested at the FIRST save, never at launch — a storage
-  // prompt before anything is stored is how apps get deleted. Failure here
-  // is not an import failure; the video is already written.
-  try { await media.requestPersistence(); } catch { /* advisory */ }
+  // prompt before anything is stored is how apps get deleted. It
+  // short-circuits when already granted, so this never re-prompts. Failure
+  // here is not an import failure; the video is already written.
+  const mPersist = performance.now();
+  let persistResult = null;
+  try { persistResult = await media.requestPersistence(); } catch { /* advisory */ }
+  timings.persistMs = since(mPersist);
 
   // Derived and optional. A thumbnail that will not render must not cost
-  // the golfer their import.
+  // the golfer their import — but the outcome is REPORTED rather than
+  // silently swallowed, so a failure is visible instead of looking like a
+  // missing picture.
+  const mThumb = performance.now();
   let thumbRef = null;
+  let thumbnail = { ok: false, reason: 'not_generated' };
   const thumb = await generateThumbnail(file);
   if (thumb) {
     const tk = thumbKey(swingId);
     const tw = await media.putMedia(tk, thumb);
-    if (tw.ok) thumbRef = tk;
+    if (tw.ok) { thumbRef = tk; thumbnail = { ok: true, bytes: thumb.size }; }
+    else thumbnail = { ok: false, reason: tw.reason || 'thumb_write_failed' };
+  } else {
+    thumbnail = { ok: false, reason: 'decode_or_canvas_failed' };
   }
+  timings.thumbnailMs = since(mThumb);
 
+  const mRecord = performance.now();
   const record = db.createSwingVideo({
     ...fields,
     swing_video_id: swingId,
@@ -151,14 +183,16 @@ export async function importSwingVideo(file, fields = {}) {
     thumb_ref: thumbRef,
   });
 
+  timings.recordMs = since(mRecord);
+
   if (!record) {
     // The record is the thing that makes bytes findable. Without it they
     // are garbage, so they go immediately rather than waiting for a sweep.
     await media.deleteMedia(key);
     if (thumbRef) await media.deleteMedia(thumbRef);
-    return { ok: false, reason: 'record_failed' };
+    return done({ ok: false, reason: 'record_failed', stage: 'storage' });
   }
-  return { ok: true, video: record };
+  return done({ ok: true, video: record, thumbnail, persistence: persistResult });
 }
 
 // An object URL for playback, or null when the bytes are gone.
