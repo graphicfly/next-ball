@@ -87,7 +87,8 @@ export function renderDevMedia(root) {
 
         <div class="section-eyebrow">3 · Storage</div>
         <table class="dev-table" id="storageTable"></table>
-        <button class="btn btn-outline btn-sm" id="persistBtn" style="margin-top:var(--space-2);">Request persistent storage</button>
+        <button class="btn btn-outline" id="persistBtn" style="margin-top:var(--space-2);width:100%;">Request persistent storage</button>
+        <div class="tiny" id="persistResult" style="margin-top:var(--space-2);"></div>
 
         <div class="section-eyebrow">4 · Delete</div>
         <button class="btn btn-danger btn-sm" id="deleteBtn">Delete stored video</button>
@@ -264,10 +265,23 @@ export function renderDevMedia(root) {
     return s;
   }
 
+  // The outcome is shown NEXT TO the button. It used to go to the status
+  // line at the top of the page, so tapping it looked like nothing had
+  // happened — the answer was there, just nowhere near the question.
   qs('#persistBtn', root).addEventListener('click', async () => {
+    const out = qs('#persistResult', root);
+    out.innerHTML = '<span class="muted">requesting…</span>';
     const r = await media.requestPersistence();
+    const after = await refreshStorage();
+
+    let line;
+    if (!r.supported) line = '<b class="bad">UNSUPPORTED</b> — persist() does not exist in this browser.';
+    else if (r.granted || after.persisted === true) line = '<b class="ok">GRANTED</b> — this origin is now protected from eviction.';
+    else if (r.error) line = `<b class="bad">ERROR</b> — ${escapeHtml(r.error)}`;
+    else line = '<b class="bad">REFUSED</b> — the browser declined. Storage still works; it is evictable under pressure.';
+
+    out.innerHTML = `${line}<br/><span class="muted">persist() returned ${escapeHtml(JSON.stringify(r))} · persisted() now ${String(after.persisted)}</span>`;
     setStatus(`persist() → ${JSON.stringify(r)}`);
-    await refreshStorage();
     render();
   });
 
