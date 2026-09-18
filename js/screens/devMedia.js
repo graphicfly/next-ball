@@ -23,7 +23,7 @@ import { qs, qsa, escapeHtml } from '../ui.js';
 const STATE_KEY = 'nextball_dev_media_validation';
 
 const blank = () => ({
-  videoId: null, importedAt: null,
+  videoId: null, importedAt: null, verifiedBytes: null, estimateAtVerify: null,
   hevcImport: null, playback: null, reloadPersistence: null,
   thumbnail: null, thumbnailReason: null,
   largeImport: null, deleteResult: null,
@@ -82,6 +82,8 @@ export function renderDevMedia(root) {
           <button class="btn btn-outline btn-sm" id="playBtn">Play stored video</button>
           <button class="btn btn-outline btn-sm" id="thumbBtn">Show thumbnail</button>
         </div>
+        <button class="btn btn-outline" id="verifyBtn" style="margin-top:var(--space-2);width:100%;">Verify stored bytes</button>
+        <table class="dev-table" id="verifyTable"></table>
         <video id="player" playsinline controls hidden style="width:100%;border-radius:12px;background:#000;margin-top:var(--space-3);"></video>
         <img id="thumbImg" hidden alt="" style="width:120px;border-radius:8px;margin-top:var(--space-3);" />
 
@@ -241,6 +243,48 @@ export function renderDevMedia(root) {
     setStatus('THUMBNAIL: PASS');
   });
 
+  // Reads the blob back out of IndexedDB and weighs it.
+  //
+  // This exists because navigator.storage.estimate() reported 1.4 MB on iOS
+  // for a stored 101.4 MB video. Only one of those two numbers describes
+  // whether the golfer's video is actually on the device, and it is not the
+  // estimate — so the bytes are counted directly rather than inferred from
+  // a figure the platform computes at its own convenience.
+  qs('#verifyBtn', root).addEventListener('click', async () => {
+    if (!state.videoId) { setStatus('Nothing imported yet.'); return; }
+    const record = db.getSwingVideo(state.videoId);
+    if (!record) { setStatus('No record for that id.'); return; }
+
+    const t0 = performance.now();
+    const blob = await media.getMedia(record.media_ref);
+    const readMs = Math.round(performance.now() - t0);
+    const thumb = record.thumb_ref ? await media.getMedia(record.thumb_ref) : null;
+    const est = await navigator.storage.estimate();
+
+    const actual = blob?.size ?? 0;
+    const expected = record.size_bytes ?? 0;
+    const match = actual === expected && actual > 0;
+    state.verifiedBytes = actual;
+    state.estimateAtVerify = est.usage ?? null;
+
+    rows(qs('#verifyTable', root), [
+      ['bytes read back', actual ? `${actual.toLocaleString()} (${mb(actual)})` : 'NOTHING', match ? 'ok' : 'bad'],
+      ['bytes recorded at import', expected ? `${expected.toLocaleString()} (${mb(expected)})` : '—'],
+      ['byte-for-byte match', verdict(match), cls(match)],
+      ['read time', ms(readMs)],
+      ['thumbnail bytes', thumb ? mb(thumb.size) : 'none', thumb ? 'ok' : 'bad'],
+      ['estimate().usage right now', `${(est.usage ?? 0).toLocaleString()} (${mb(est.usage)})`],
+      ['estimate vs actual', actual && est.usage != null
+        ? (est.usage >= actual ? 'estimate includes the video' : 'ESTIMATE UNDER-REPORTS')
+        : '—',
+        actual && est.usage != null && est.usage < actual ? 'bad' : 'ok'],
+    ]);
+    setStatus(match
+      ? `Verified: ${mb(actual)} read back from storage.`
+      : 'Verification FAILED — see table.');
+    persist();
+  });
+
   // ---------- 3. Storage ----------
   async function refreshStorage() {
     const s = await swingMedia.storageStatus();
@@ -366,6 +410,7 @@ export function renderDevMedia(root) {
       `  thumbnail:         ${ms(t.thumbnailMs)}`,
       `  record write:      ${ms(t.recordMs)}`,
       `UI longest stall:    ${state.uiMaxGapMs == null ? '—' : state.uiMaxGapMs + ' ms'}`,
+      `Bytes read back:     ${state.verifiedBytes == null ? '—' : mb(state.verifiedBytes)}`,
       `Storage usage:       ${mb(state.usageBytes)}`,
       `Storage quota:       ${gb(state.quotaBytes)}`,
       '',
