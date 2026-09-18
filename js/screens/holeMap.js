@@ -4,6 +4,7 @@ import { greenEdgeYards, yardsBetween, metersToYards, bearingDegrees, boundsOf }
 import { watchPosition, POSITION_STATE, accuracyTier, yardagesUsable } from '../livePosition.js';
 import { setHoleEntryState } from '../state.js';
 import { loadMapLibre } from '../mapLibreLoader.js';
+import { enableWakeLock } from '../wakeLock.js';
 
 // Hole Map — docs/course-mode-spec.md §14.5, Reference C.
 //
@@ -52,6 +53,11 @@ const STATE_COPY = {
 export function renderHoleMap(root, holeNumberParam) {
   const round = db.getActiveRound();
   if (!round) { location.hash = '#/home'; return; }
+
+  // The map is the screen a golfer leaves open while walking to the ball,
+  // so it is where a sleeping phone is most obvious — and it is watching
+  // GPS, which the OS suspends along with the screen.
+  enableWakeLock();
 
   const holeNumber = Number.parseInt(holeNumberParam, 10);
   const def = round.hole_defs.find((d) => d.hole_number === holeNumber);

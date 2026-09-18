@@ -3,6 +3,7 @@ import { qs, qsa, escapeHtml, toast, trapSheetFocus, presentSheet, commitOnce } 
 import { getClubQuickPicks } from '../setupPersonalization.js';
 import { openEndRoundSheet } from './home.js';
 import { setHoleEntryState, getHoleEntryState, clearHoleEntryState } from '../state.js';
+import { enableWakeLock } from '../wakeLock.js';
 
 // Course Session / Hole Entry — docs/course-mode-spec.md §4.4, Reference C.
 //
@@ -68,6 +69,16 @@ export function renderCourseRound(root) {
   const round = db.getActiveRound();
   if (!round) { location.hash = '#/home'; return; }
   if (round.status === 'paused') db.resumeRound(round.round_id);
+
+  // A round is an active activity exactly as a range session is, and it
+  // runs far longer — two to four hours outdoors, with minutes of walking
+  // between taps. endRound() already released the lock; nothing ever took
+  // it, so the phone slept between holes and on the map.
+  //
+  // Acquired on render rather than only at startRound so every way back
+  // into a live round is covered: resuming from Home, from History, or
+  // after the app was relaunched. enableWakeLock is idempotent.
+  enableWakeLock();
 
   const holes = db.getHolesForRound(round.round_id);
   const played = new Set(holes.map((h) => h.hole_number));

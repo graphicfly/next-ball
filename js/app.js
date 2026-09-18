@@ -20,7 +20,7 @@ import { renderLessonSummary } from './screens/lessonSummary.js';
 import { renderDevMedia } from './screens/devMedia.js';
 import { renderTrends } from './screens/trends.js';
 import { renderSettings } from './screens/settings.js';
-import { getActiveSession, getSettings } from './db.js';
+import { getActiveSession, getActiveRound, getSettings } from './db.js';
 import { enableWakeLock } from './wakeLock.js';
 import { startWeatherTracking } from './sessionWeather.js';
 import { startLocationResolution } from './sessionLocation.js';
@@ -98,3 +98,10 @@ if (bootSession && bootSession.status === 'active') {
   startWeatherTracking(bootSession.session_id);
   startLocationResolution(bootSession.session_id);
 }
+
+// The same recovery for a round in progress. A round outlives an app
+// relaunch far more often than a range session does — a phone left in a
+// pocket for three holes is ordinary — and without this the lock was lost
+// for the rest of the round.
+const bootRound = getActiveRound();
+if (bootRound && bootRound.status === 'active') enableWakeLock();
