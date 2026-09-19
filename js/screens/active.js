@@ -7,6 +7,12 @@ import { startLocationResolution } from '../sessionLocation.js';
 import { openLocationSheet } from './locationSheet.js';
 import { openShotDrillSheet, openShotTrainingAidSheet, openShotSetupSheet, openShotTargetSheet } from './historyDetail.js';
 import { openEndSessionSheet } from './home.js';
+import { getLastCapturedSwing } from '../state.js';
+
+// Optional and secondary by construction: a range session that never
+// records must cost nothing extra, so nothing here loads the camera, the
+// media tier or any analysis code until the golfer taps Record (§25).
+const ICON_RECORD = '<rect x="3" y="7" width="12" height="10" rx="2" /><path d="M15 11l6-3v8l-6-3" />';
 
 // Registered once at module load (not per-render) so a background weather
 // update re-renders the screen if — and only if — it's the one showing.
@@ -221,6 +227,17 @@ export function renderActive(root) {
       <div class="secondary-actions">
         <button class="secondary-action" id="undoBtn"${shots.length ? '' : ' disabled'}>${icon(ICON_UNDO)}<span>Undo</span></button>
         <button class="secondary-action" id="editLastBtn"${shots.length ? '' : ' disabled'}>${icon(ICON_EDIT)}<span>Edit Previous</span></button>
+        ${(() => {
+          // One control, two states. A swing waiting for its shot says so
+          // and opens its preview; otherwise this records a new one.
+          const pending = db.getPendingSwingVideo(session.session_id);
+          const captured = pending || (getLastCapturedSwing() ? db.getSwingVideo(getLastCapturedSwing()) : null);
+          if (captured && captured.association_state === 'pending') {
+            return `<button class="secondary-action captured" id="capturedBtn" aria-label="Swing captured, open preview">
+              <span class="secondary-action-badge">${icon(ICON_RECORD)}<span class="secondary-dot" aria-hidden="true"></span></span><span>Swing captured</span></button>`;
+          }
+          return `<button class="secondary-action" id="recordBtn" aria-label="Record a swing">${icon(ICON_RECORD)}<span>Record</span></button>`;
+        })()}
       </div>
 
       <div class="hairline"></div>
@@ -257,6 +274,12 @@ export function renderActive(root) {
     if (!removed) { toast('No shots to undo'); return; }
     toast('Shot removed');
     renderActive(root);
+  });
+
+  qs('#recordBtn', root)?.addEventListener('click', () => { location.hash = '#/swing/capture'; });
+  qs('#capturedBtn', root)?.addEventListener('click', () => {
+    const pending = db.getPendingSwingVideo(session.session_id);
+    if (pending) location.hash = `#/swing/preview/${pending.swing_video_id}`;
   });
 
   qs('#editLastBtn', root).addEventListener('click', () => {

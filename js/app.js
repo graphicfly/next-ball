@@ -20,6 +20,7 @@ import { renderLessonSummary } from './screens/lessonSummary.js';
 import { renderDevMedia } from './screens/devMedia.js';
 import { renderTrends } from './screens/trends.js';
 import { renderProgress } from './screens/progress.js';
+import { renderSwingCapture } from './screens/swingCaptureScreen.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getActiveRound, getSettings } from './db.js';
 import { enableWakeLock } from './wakeLock.js';
@@ -68,6 +69,9 @@ const routes = [
   // Progress (V4.3) is the nav destination; Trends keeps its own route and
   // screen unchanged, reached from inside it.
   { pattern: /^#\/progress$/, render: () => renderProgress(root) },
+  // Swing Lab capture: a single-task screen, so no bottom nav — the camera
+  // is open and every exit must close it.
+  { pattern: /^#\/swing\/capture$/, render: () => renderSwingCapture(root) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];

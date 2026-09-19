@@ -143,3 +143,23 @@ export function getHoleEntryState(roundId) {
 export function clearHoleEntryState() {
   holeEntryState = null;
 }
+
+// ----- Swing Lab capture (V4.3) -----
+//
+// The camera view chosen for the current range session. In memory only and
+// deliberately not persisted: it describes where the phone is propped right
+// now, which is not true of the next session (§3). Cleared when the session
+// ends, when the golfer changes setup, or when the camera has to be
+// reconfigured.
+let sessionCameraView = null;
+
+export function setSessionCameraView(view) { sessionCameraView = view || null; }
+export function getSessionCameraView() { return sessionCameraView; }
+export function clearSessionCameraView() { sessionCameraView = null; }
+
+// The swing video waiting to be previewed straight after recording, so the
+// Range Session screen can show "Swing captured" without re-querying.
+let lastCapturedSwingId = null;
+export function setLastCapturedSwing(id) { lastCapturedSwingId = id || null; }
+export function getLastCapturedSwing() { return lastCapturedSwingId; }
+export function clearLastCapturedSwing() { lastCapturedSwingId = null; }

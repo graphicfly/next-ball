@@ -1668,6 +1668,11 @@ export function createSwingVideo(fields = {}) {
     // §5.2) — so correcting a lesson's wording later cannot rewrite what
     // this swing was filmed under.
     active_focus_snapshot: fields.active_focus_snapshot ?? null,
+    // Everything else that was true of the practice when this was filmed —
+    // club, drill, training aid, target. Also a copy, for the same reason:
+    // session defaults move during a session and history must not move
+    // with them (§10, §20).
+    practice_context: fields.practice_context ?? null,
 
     created_at: ts,
     updated_at: ts,
