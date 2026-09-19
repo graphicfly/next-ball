@@ -3,8 +3,8 @@
 Work down this list in order. Items 1–4 happen before you leave.
 
 1. **Force-quit the installed app twice.** iOS keeps a service worker alive
-   across a single quit; the second launch is the one that picks up v88.
-   Confirm the build number reads **v88** on Settings before you drive off.
+   across a single quit; the second launch is the one that picks up v89.
+   Confirm the build number reads **v89** on Settings before you drive off.
 
 2. **Check free storage.** Settings shows what Swing Lab is holding. Video is
    the only thing in this app that can fill a phone, and iOS refuses
@@ -36,22 +36,29 @@ Work down this list in order. Items 1–4 happen before you leave.
    was recorded outside the window and will show in Swing Lab as unpaired.
    That still analyses; it just has no outcome beside it.
 
-9. **Analyze one swing before recording twenty.** It takes roughly 9 seconds
+9. **On your first analysis, read "Camera gave" in the quality panel.**
+   In-app recording does not use your camera-app setting — it asks Safari
+   for 1080p at up to 120 fps and takes what it is given. "Camera gave"
+   is what Safari negotiated; **Frame rate** just above it is what the
+   frames actually measured. If that measured figure is 60 or above you
+   get tempo; below it, tempo is withheld rather than estimated.
+
+10. **Analyze one swing before recording twenty.** It takes roughly 9 seconds
    on this footage. Open **Analysis quality** and read **Body tracking**.
    - *steady* — the camera is right, carry on.
    - *unsteady* — move the camera closer and reframe before you spend the
      session on footage that cannot be measured.
 
-10. **Check the checkpoints actually land on your swing.** Scrub Address,
+11. **Check the checkpoints actually land on your swing.** Scrub Address,
     Top, Impact and Finish. They should sit where you would put them. Phase
     detection has never been validated against real, correctly-framed golf
     footage — this is the main thing today is for.
 
-11. **Turn the pose overlay on once.** It should track your body, not drift
+12. **Turn the pose overlay on once.** It should track your body, not drift
     onto a neighbouring bay. If it wanders, the measurements are worthless
     however plausible they look.
 
-12. **Note anything the numbers claim that your eyes disagree with.** The
+13. **Note anything the numbers claim that your eyes disagree with.** The
     engine measures; it does not yet interpret. A number that contradicts
     what you saw is the most useful thing you can bring back.
 
