@@ -3950,3 +3950,88 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--color-accent);
 }
+
+/* ---------- Swing Lab: preview, list, result (V4.3) ---------- */
+
+.swing-video { width: 100%; border-radius: var(--radius-lg); background: #000; display: block; }
+.swing-stage { position: relative; }
+.swing-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; border-radius: var(--radius-lg); }
+.swing-chip {
+  padding: 6px 12px; border-radius: var(--radius-full);
+  background: var(--color-surface-2); font-size: var(--text-label); font-weight: var(--weight-semibold);
+}
+.swing-actions { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-4) 0 var(--space-3); }
+
+.swing-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-2); }
+.swing-toggle {
+  background: var(--color-surface-2); border: 1.5px solid transparent; border-radius: var(--radius-full);
+  color: var(--color-text-secondary); font-size: var(--text-label); font-weight: var(--weight-semibold);
+  padding: 9px 15px; min-height: 40px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.swing-toggle[aria-pressed="true"] { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-soft); }
+
+/* One dominant idea. The observation gets the weight, and everything else
+   sits behind a tap (§10). */
+.swing-result-head { margin-bottom: var(--space-4); }
+.swing-result-title { font-size: var(--text-title); font-weight: var(--weight-bold); letter-spacing: -0.01em; }
+.swing-result-shot { margin-top: 2px; font-size: var(--text-label); color: var(--color-text-secondary); }
+/* Shot outcome and instructor context are visually separate from the
+   biomechanical evidence, and nothing implies one caused the other. */
+.swing-result-focus {
+  margin-top: var(--space-3); padding-left: var(--space-3);
+  border-left: 3px solid var(--color-focus);
+  font-size: var(--text-label); font-weight: var(--weight-semibold);
+}
+.swing-result-focus span {
+  display: block; font-size: var(--text-section); text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--color-focus); font-weight: var(--weight-bold);
+}
+.swing-standout {
+  font-size: var(--text-body-lg); line-height: var(--leading-normal);
+  margin: 0 0 var(--space-4);
+}
+
+.swing-checkpoints { display: flex; gap: var(--space-2); overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.swing-checkpoints::-webkit-scrollbar { display: none; }
+.swing-checkpoint {
+  flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: var(--color-surface); border: 1.5px solid transparent; border-radius: var(--radius-md);
+  color: var(--color-text-primary); font-size: var(--text-label); font-weight: var(--weight-semibold);
+  padding: 10px 14px; min-height: var(--tap-min); cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.swing-checkpoint.active { border-color: var(--color-accent); color: var(--color-accent); }
+.swing-checkpoint.unavailable { opacity: 0.4; cursor: default; }
+.swing-checkpoint-note { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-tertiary); font-weight: var(--weight-medium); }
+
+.swing-details { background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); }
+.swing-details > summary { cursor: pointer; font-weight: var(--weight-semibold); min-height: var(--tap-min); display: flex; align-items: center; }
+.swing-metric { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); padding: 7px 0; border-bottom: 1px solid var(--color-divider); font-size: var(--text-label); }
+.swing-metric:last-child { border-bottom: none; }
+.swing-metric > span { color: var(--color-text-secondary); }
+.swing-metric > b { font-variant-numeric: tabular-nums; }
+.swing-metric-conf { font-size: 10px; color: var(--color-text-tertiary); font-style: normal; text-transform: uppercase; letter-spacing: 0.05em; }
+.swing-metric-group { margin-top: var(--space-3); font-size: var(--text-section); text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-secondary); font-weight: var(--weight-semibold); }
+
+.swing-lab-count { font-size: var(--text-title); font-weight: var(--weight-bold); margin-bottom: var(--space-3); }
+.swing-row {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  background: var(--color-surface); border: none; border-radius: var(--radius-lg);
+  padding: var(--space-3); margin-bottom: var(--space-2); color: var(--color-text-primary);
+  text-align: left; cursor: pointer; min-height: var(--tap-min); -webkit-tap-highlight-color: transparent;
+}
+.swing-row:active { background: var(--color-surface-2); }
+.swing-row-thumb { flex-shrink: 0; width: 56px; height: 56px; border-radius: var(--radius-sm); background: var(--color-surface-2) center/cover no-repeat; }
+.swing-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.swing-row-title { font-size: var(--text-body); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swing-row-sub { margin-top: 1px; font-size: var(--text-caption); color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swing-row-tag { flex-shrink: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-accent); font-weight: var(--weight-bold); }
+.swing-row-chevron { flex-shrink: 0; width: 18px; height: 18px; color: var(--color-text-tertiary); }
+
+.analyze-wait { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: var(--space-3); padding-top: 18vh; }
+.analyze-spinner { width: 54px; height: 54px; border-radius: 50%; border: 3px solid var(--color-surface-2); border-top-color: var(--color-accent); }
+@media (prefers-reduced-motion: no-preference) { .analyze-spinner { animation: analyzeSpin 1s linear infinite; } }
+@keyframes analyzeSpin { to { transform: rotate(360deg); } }
+.analyze-stage { font-size: var(--text-body-lg); font-weight: var(--weight-semibold); }
+.analyze-progress { width: 70%; height: 4px; background: var(--color-surface-2); border-radius: 2px; overflow: hidden; }
+.analyze-progress > i { display: block; height: 100%; width: 0; background: var(--color-accent); transition: width var(--duration-slow) var(--ease-standard); }
+.analyze-fail { font-size: var(--text-title); font-weight: var(--weight-bold); color: var(--color-danger); }
