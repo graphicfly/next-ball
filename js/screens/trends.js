@@ -204,7 +204,7 @@ export function renderTrends(root) {
   root.innerHTML = `
     <div class="screen">
       <div class="topbar">
-        <button class="back" id="homeBtn">&larr; Home</button>
+        <button class="back" id="backBtn">&larr; Progress</button>
         <span class="screen-title">Trends</span>
         <span class="side-space"></span>
       </div>
@@ -212,6 +212,7 @@ export function renderTrends(root) {
     </div>
   `;
 
-  qs('#homeBtn', root).addEventListener('click', () => { location.hash = '#/home'; });
+  // Reached from Progress in V4.3, so back returns there rather than Home.
+  qs('#backBtn', root).addEventListener('click', () => { location.hash = '#/progress'; });
   renderBody();
 }

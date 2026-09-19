@@ -284,6 +284,10 @@ function normalizeIndexShape(idx) {
   for (const v of idx.swing_videos) {
     if (!v.camera_view) v.camera_view = 'unknown';
     if (!v.media_state) v.media_state = 'present';
+    // Videos written by V4.3 Phase 1 predate association entirely. A video
+    // with a shot is linked; one without never had a shot coming.
+    if (!v.association_state) v.association_state = v.shot_id ? 'linked' : 'unpaired';
+    if (v.shot_id === undefined) v.shot_id = null;
   }
   if (!idx.settings || typeof idx.settings !== 'object') idx.settings = {};
   if (idx.settings.active_swing_focus === undefined) idx.settings.active_swing_focus = null;
@@ -647,6 +651,10 @@ export function findRememberedVenue(latitude, longitude) {
 }
 
 export function finishSession(sessionId) {
+  // A swing still waiting for a shot that will never come is not lost — it
+  // becomes an unpaired session swing (§17). Settled here rather than in the
+  // UI so every way a session ends is covered.
+  settlePendingSwingVideos(sessionId);
   return updateSession(sessionId, { status: 'finished', end_time: new Date().toTimeString().slice(0, 5) });
 }
 
@@ -1046,6 +1054,10 @@ export function addShot(sessionId, fields) {
   };
   shotsForSession.push(shot);
   saveShotsChunk(sessionId);
+  // A swing recorded since the last shot belongs to THIS shot. Linking here
+  // rather than in the UI means every path that logs a shot gets it, and no
+  // screen has to remember to ask.
+  linkPendingSwingVideoToShot(sessionId, shot.shot_id);
   return shot;
 }
 
@@ -1100,6 +1112,8 @@ export function deleteShots(sessionId, shotIds) {
   const removedCount = shots.length - remaining.length;
   _shotsCache.set(sessionId, remaining);
   saveShotsChunk(sessionId);
+  // The footage outlives the outcome (§19).
+  unpairSwingVideosForShots([...idSet]);
   return removedCount;
 }
 
@@ -1110,6 +1124,8 @@ export function deleteLastShot(sessionId) {
   for (const s of shotsForSession) if (s.shot_number > last.shot_number) last = s;
   _shotsCache.set(sessionId, shotsForSession.filter((s) => s.shot_id !== last.shot_id));
   saveShotsChunk(sessionId);
+  // Undo removes the outcome, not the swing.
+  unpairSwingVideosForShots([last.shot_id]);
   return last;
 }
 
@@ -1575,6 +1591,10 @@ export const CAMERA_VIEWS = ['face_on', 'down_the_line', 'unknown'];
 //            or a backup restored onto a different device
 export const MEDIA_STATES = ['present', 'missing'];
 
+// 'unpaired' is the default rather than an error: a swing with no shot is a
+// complete record that simply has no outcome to compare against.
+export const ASSOCIATION_STATES = ['pending', 'linked', 'unpaired'];
+
 function normalizeView(view) {
   return CAMERA_VIEWS.includes(view) ? view : 'unknown';
 }
@@ -1627,6 +1647,19 @@ export function createSwingVideo(fields = {}) {
     media_state: 'present',
     thumb_ref: fields.thumb_ref || null,
 
+    // How this swing relates to a logged Shot.
+    //
+    //   'pending'   recorded, waiting for the NEXT shot to be logged
+    //   'linked'    attached to a shot, which carries the outcome
+    //   'unpaired'  no shot, and none is coming — a complete record, not
+    //               a failure (§17). The golfer filmed a swing and did not
+    //               log its result, which is an ordinary thing to do.
+    //
+    // A video and a shot are independently durable: either may exist
+    // without the other, and deleting one never deletes the other.
+    association_state: ASSOCIATION_STATES.includes(fields.association_state) ? fields.association_state : 'unpaired',
+    shot_id: fields.shot_id || null,
+
     // Association only. Deleting a video must never cascade into these, and
     // deleting one of these must never cascade into the video.
     lesson_id: fields.lesson_id || null,
@@ -1663,7 +1696,7 @@ export function listSwingVideos() {
 export function updateSwingVideo(id, patch = {}) {
   const record = getSwingVideo(id);
   if (!record) return null;
-  const allowed = ['club', 'camera_view', 'lesson_id', 'range_session_id', 'media_state', 'thumb_ref', 'captured_at'];
+  const allowed = ['club', 'camera_view', 'lesson_id', 'range_session_id', 'media_state', 'thumb_ref', 'captured_at', 'practice_context'];
   for (const key of allowed) {
     if (patch[key] === undefined) continue;
     if (key === 'camera_view') record.camera_view = normalizeView(patch.camera_view);
@@ -1711,6 +1744,132 @@ export function allSwingMediaRefs() {
     if (v.thumb_ref) refs.push(v.thumb_ref);
   }
   return refs;
+}
+
+// ----- Swing video <-> shot association (swing-lab-spec.md; V4.3) -----
+//
+// The Shot stays the primary object of a range session. A SwingVideo
+// ENRICHES a shot when both describe the same swing, and neither depends on
+// the other existing:
+//
+//   a shot with no video    ordinary — most shots, for most golfers
+//   a video with no shot    ordinary — filmed a swing, did not log it
+//
+// Association is automatic and never asked about. A recorded swing is
+// PENDING until the next shot is logged, at which point it links to THAT
+// shot — never the previous one, which was a different swing.
+
+// At most one video per session may be waiting for the next shot. A second
+// recording does not queue behind the first; see setPendingSwingVideo.
+export function getPendingSwingVideo(sessionId) {
+  if (!sessionId) return null;
+  return loadIndex().swing_videos.find(
+    (v) => v.range_session_id === sessionId && v.association_state === 'pending',
+  ) || null;
+}
+
+// Makes a video the one waiting for the next shot, demoting any previous
+// pending video to unpaired.
+//
+// §18: recording twice before logging a shot must not delete either video
+// and must not stop to ask. The older swing was still really swung — it
+// simply never got an outcome, which is exactly what 'unpaired' means.
+export function setPendingSwingVideo(swingVideoId) {
+  const index = loadIndex();
+  const video = index.swing_videos.find((v) => v.swing_video_id === swingVideoId);
+  if (!video) return null;
+
+  let demoted = null;
+  const previous = getPendingSwingVideo(video.range_session_id);
+  if (previous && previous.swing_video_id !== swingVideoId) {
+    previous.association_state = 'unpaired';
+    previous.updated_at = nowISO();
+    demoted = previous;
+  }
+
+  video.association_state = 'pending';
+  video.shot_id = null;
+  video.updated_at = nowISO();
+  saveIndex();
+  return { pending: video, demoted };
+}
+
+// Attaches the session's pending video to a shot. Called from addShot, so
+// the golfer is never asked "attach this swing?" — by the time there is a
+// question to ask, the answer is already known.
+export function linkPendingSwingVideoToShot(sessionId, shotId) {
+  const pending = getPendingSwingVideo(sessionId);
+  if (!pending || !shotId) return null;
+
+  const index = loadIndex();
+  pending.association_state = 'linked';
+  pending.shot_id = shotId;
+  pending.updated_at = nowISO();
+
+  // The shot carries the reverse reference, and only the reference — never
+  // the video itself. A shot chunk holds hundreds of rows and must stay
+  // small enough to load on every session open.
+  const shots = loadShotsChunk(sessionId);
+  const shot = shots.find((s) => s.shot_id === shotId);
+  if (shot) {
+    shot.swing_video_id = pending.swing_video_id;
+    saveShotsChunk(sessionId);
+  }
+  saveIndex();
+  void index;
+  return pending;
+}
+
+// Everything filmed during one session, newest first — linked, pending and
+// unpaired alike.
+export function listSwingVideosForSession(sessionId) {
+  if (!sessionId) return [];
+  return loadIndex().swing_videos
+    .filter((v) => v.range_session_id === sessionId)
+    .sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)));
+}
+
+export function getSwingVideoForShot(shotId) {
+  if (!shotId) return null;
+  return loadIndex().swing_videos.find((v) => v.shot_id === shotId) || null;
+}
+
+// A video whose shot has gone becomes unpaired rather than being deleted.
+//
+// §19: the two are independently durable. Deleting a shot removes an
+// outcome; it does not un-swing the swing, and the footage is often the
+// more valuable half.
+export function unpairSwingVideosForShots(shotIds) {
+  const ids = new Set((shotIds || []).filter(Boolean));
+  if (!ids.size) return 0;
+  const index = loadIndex();
+  let changed = 0;
+  for (const v of index.swing_videos) {
+    if (v.shot_id && ids.has(v.shot_id)) {
+      v.shot_id = null;
+      v.association_state = 'unpaired';
+      v.updated_at = nowISO();
+      changed += 1;
+    }
+  }
+  if (changed) saveIndex();
+  return changed;
+}
+
+// Called when a session ends: a swing still waiting for a shot that will
+// never come is not lost, it is simply unpaired (§17).
+export function settlePendingSwingVideos(sessionId) {
+  const index = loadIndex();
+  let settled = 0;
+  for (const v of index.swing_videos) {
+    if (v.range_session_id === sessionId && v.association_state === 'pending') {
+      v.association_state = 'unpaired';
+      v.updated_at = nowISO();
+      settled += 1;
+    }
+  }
+  if (settled) saveIndex();
+  return settled;
 }
 
 // ----- Lessons (docs/lesson-spec.md §2) -----

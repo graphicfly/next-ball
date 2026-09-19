@@ -45,10 +45,14 @@ export function applyTheme(pref) {
 // Purely presentational — it just sets location.hash, so it never touches
 // the router or any screen's own logic.
 
+// Progress replaces Trends in the global nav (V4.3). Trends is not gone —
+// it moves inside Progress alongside Swing Lab and Development, because
+// three things now answer "how am I getting on?" and a tab each would put
+// Swing Lab at the same standing as History for something used far less.
 const NAV_ITEMS = [
   { hash: '#/home', label: 'Home', icon: 'home' },
+  { hash: '#/progress', label: 'Progress', icon: 'trends' },
   { hash: '#/history', label: 'History', icon: 'history' },
-  { hash: '#/trends', label: 'Trends', icon: 'trends' },
   { hash: '#/settings', label: 'Settings', icon: 'settings' },
 ];
 
@@ -93,7 +97,10 @@ export function weatherIconHtml(condition) {
 
 // Screens that show the bottom nav. Every other route hides it so
 // single-task flows (starting/logging/reviewing a session) stay uncluttered.
-const NAV_ROUTES = new Set(['#/home', '#/history', '#/trends', '#/settings']);
+// #/trends keeps its place here: it is still a real route, reached from
+// inside Progress, and it keeps the nav rather than becoming a single-task
+// screen — a golfer who taps into Trends has not left the Progress area.
+const NAV_ROUTES = new Set(['#/home', '#/progress', '#/history', '#/trends', '#/settings']);
 
 // The Hole Map is the one Course Mode screen that shows the bottom nav — an
 // approved exception to §11.2, per Reference C and §14.5. §14.12.4 records
