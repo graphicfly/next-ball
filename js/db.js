@@ -226,6 +226,8 @@ function defaultIndex() {
     // Metadata only. The video bytes live in the media tier (js/media.js),
     // and this record deliberately outlives them — see deleteSwingVideo.
     swing_videos: [],
+    // Derived from swing_videos and disposable — see createSwingAnalysis.
+    swing_analyses: [],
     // active_swing_focus is a POINTER at a lesson's cue, not a copy of it —
     // see setActiveSwingFocus. Null when no focus is set, which is the
     // state every install starts in and the state a golfer can return to.
@@ -281,6 +283,7 @@ function normalizeIndexShape(idx) {
   // Swing Lab metadata, added in V4.3. Same normalize-on-load treatment as
   // every collection before it.
   if (!Array.isArray(idx.swing_videos)) idx.swing_videos = [];
+  if (!Array.isArray(idx.swing_analyses)) idx.swing_analyses = [];
   for (const v of idx.swing_videos) {
     if (!v.camera_view) v.camera_view = 'unknown';
     if (!v.media_state) v.media_state = 'present';
@@ -415,6 +418,7 @@ export function getDB() {
     // another device therefore produces records whose media is absent,
     // which media_state already describes.
     swing_videos: index.swing_videos,
+    swing_analyses: index.swing_analyses,
     settings: index.settings,
   };
 }
@@ -1735,6 +1739,9 @@ export function deleteSwingVideo(id) {
     index.swing_videos.splice(i, 0, removed);
     throw Object.assign(new Error('Failed to delete swing video'), { code: 'storage_error' });
   }
+  // Analyses are meaningless without the video that produced them, and are
+  // recomputable if it ever returns. The Shot is untouched (§19).
+  deleteSwingAnalysesForVideo(id);
   return {
     record: removed,
     mediaRefs: [removed.media_ref, removed.thumb_ref].filter(Boolean),
@@ -1820,6 +1827,9 @@ export function linkPendingSwingVideoToShot(sessionId, shotId) {
     shot.swing_video_id = pending.swing_video_id;
     saveShotsChunk(sessionId);
   }
+  // An analysis made before the shot existed gains its context without
+  // recomputing anything (§17).
+  enrichSwingAnalysisWithShot(pending.swing_video_id, shotId);
   saveIndex();
   void index;
   return pending;
@@ -1875,6 +1885,110 @@ export function settlePendingSwingVideos(sessionId) {
   }
   if (settled) saveIndex();
   return settled;
+}
+
+// ----- Swing analyses (swing-lab-spec.md §20.2, §20.4) -----
+//
+// Derived, versioned, and disposable. The VIDEO is the user's media and is
+// immutable; an analysis is what one version of the engine made of it, and
+// a better engine may supersede it later.
+//
+// Re-analysis therefore ADDS a record rather than overwriting one (§16).
+// Provenance is never silently lost: every analysis names the engine,
+// model and rules that produced it, so two numbers can always be compared
+// knowing whether they came from the same detector.
+
+export function createSwingAnalysis(fields = {}) {
+  if (!fields.swing_video_id) return null;
+  const index = loadIndex();
+  const ts = nowISO();
+  const record = {
+    swing_analysis_id: uuid(),
+    swing_video_id: fields.swing_video_id,
+
+    // Provenance. One integer for the pipeline, plus the components, so a
+    // comparison across versions can be flagged rather than silently mixed.
+    analysis_version: fields.analysis_version ?? 1,
+    pose_model: fields.pose_model ?? null,
+    pose_model_version: fields.pose_model_version ?? null,
+    measurement_version: fields.measurement_version ?? 1,
+
+    // What was actually analysed: the dense window inside the source clip.
+    swing_window: fields.swing_window ?? null,
+    camera_view: fields.camera_view ?? 'unknown',
+    source: fields.source ?? null,
+
+    video_quality: fields.video_quality ?? null,
+    capability: fields.capability ?? null,
+
+    detected_phases: fields.detected_phases ?? [],
+    measurements: fields.measurements ?? [],
+    observations: fields.observations ?? [],
+    signals: fields.signals ?? null,
+
+    // Context is carried for provenance and for the future interpretation
+    // layer. It never influenced a measurement: pose is computed from the
+    // video alone, and a fat shot must not make the engine go looking for
+    // a fault (§18, §19).
+    shot_id: fields.shot_id ?? null,
+    range_session_id: fields.range_session_id ?? null,
+    active_focus_snapshot: fields.active_focus_snapshot ?? null,
+    lesson_id: fields.lesson_id ?? null,
+
+    timing: fields.timing ?? null,
+    status: fields.status ?? 'complete',
+    created_at: ts,
+  };
+  index.swing_analyses.push(record);
+  if (!saveIndex()) { index.swing_analyses.pop(); return null; }
+  return record;
+}
+
+export function getSwingAnalysis(id) {
+  return loadIndex().swing_analyses.find((a) => a.swing_analysis_id === id) || null;
+}
+
+// Every analysis of one video, newest first — the history, not just the
+// latest. The UI may show only the newest; the record keeps the rest.
+export function listSwingAnalyses(swingVideoId) {
+  const all = loadIndex().swing_analyses;
+  // Insertion order is the tie-break, and it is load-bearing: two analyses
+  // of the same video can be created inside one millisecond, and comparing
+  // created_at alone then returns them in storage order — which made
+  // getLatestSwingAnalysis hand back the OLDEST result after a re-analysis.
+  return all
+    .map((a, i) => ({ a, i }))
+    .filter(({ a }) => a.swing_video_id === swingVideoId)
+    .sort((x, y) => String(y.a.created_at).localeCompare(String(x.a.created_at)) || (y.i - x.i))
+    .map(({ a }) => a);
+}
+
+export function getLatestSwingAnalysis(swingVideoId) {
+  return listSwingAnalyses(swingVideoId)[0] || null;
+}
+
+// Attaches a shot to an analysis made BEFORE the shot existed.
+//
+// §17: deterministic pose measurements do not change because an outcome
+// arrived — the movement was the movement. Only the context is enriched, so
+// nothing is recomputed and nothing is thrown away.
+export function enrichSwingAnalysisWithShot(swingVideoId, shotId) {
+  const index = loadIndex();
+  let changed = 0;
+  for (const a of index.swing_analyses) {
+    if (a.swing_video_id === swingVideoId && !a.shot_id) { a.shot_id = shotId; changed += 1; }
+  }
+  if (changed) saveIndex();
+  return changed;
+}
+
+export function deleteSwingAnalysesForVideo(swingVideoId) {
+  const index = loadIndex();
+  const before = index.swing_analyses.length;
+  index.swing_analyses = index.swing_analyses.filter((a) => a.swing_video_id !== swingVideoId);
+  const removed = before - index.swing_analyses.length;
+  if (removed) saveIndex();
+  return removed;
 }
 
 // ----- Lessons (docs/lesson-spec.md §2) -----
@@ -2717,6 +2831,7 @@ export function importFullDB(obj) {
     // collection added before it: absent means empty, not corrupt.
     lessons: Array.isArray(obj.lessons) ? obj.lessons : [],
     swing_videos: Array.isArray(obj.swing_videos) ? obj.swing_videos : [],
+    swing_analyses: Array.isArray(obj.swing_analyses) ? obj.swing_analyses : [],
     // Merged (not `obj.settings || defaultIndex().settings`) so an empty or
     // partial settings object — e.g. Settings' "Erase All Data" passing
     // `{}` deliberately — still ends up with every default field rather

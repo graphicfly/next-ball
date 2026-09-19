@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v83';
+const CACHE_NAME = 'nextball-v84';
 // NOTE: vendor/maplibre is deliberately NOT precached (§14.5). At 1.01 MB it
 // is larger than the entire rest of the app, for a screen half of all
 // courses cannot show — precaching it would roughly double a fresh install.
@@ -34,6 +34,13 @@ const PRECACHE_URLS = [
   './js/swingMedia.js',
   './js/swingCapture.js',
   './js/swingContext.js',
+  // The evidence layer. swingPose.js is deliberately ABSENT: it pulls a
+  // multi-megabyte model from a CDN and is imported only when a golfer
+  // chooses Analyze, exactly as vendor/maplibre is handled.
+  './js/swingEvidence.js',
+  './js/swingPhases.js',
+  './js/swingMeasure.js',
+  './js/swingAnalysis.js',
   './js/rangeCourseInsights.js',
   './js/sessionStory.js',
   './js/summarySections.js',
