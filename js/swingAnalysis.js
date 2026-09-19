@@ -213,7 +213,28 @@ export function buildEvidence(series, { cameraView = 'unknown', fps = null, dura
 // Returns structured evidence and persists a versioned record. Never
 // throws: a failed analysis must leave the video and the shot untouched
 // (§21), so every failure is a typed result the caller can act on.
-export async function analyzeSwing(swingVideoId, { onStage, signal, candidateIndex = 0 } = {}) {
+// One analysis at a time, because the pose landmarker is a singleton.
+//
+// Two overlapping runs do not merely duplicate work — they interleave on
+// the same MediaPipe instance and corrupt each other's frames. A second
+// request for the SAME swing joins the run already going, which is what a
+// double tap on Analyze means; a request for a different swing is refused
+// rather than queued, so the caller can say so instead of appearing hung.
+let inFlight = null;
+
+export function analyzeSwing(swingVideoId, opts = {}) {
+  if (inFlight) {
+    if (inFlight.id === swingVideoId) return inFlight.promise;
+    return Promise.resolve({ ok: false, reason: 'busy', timing: null });
+  }
+  const promise = runAnalysis(swingVideoId, opts).finally(() => { inFlight = null; });
+  inFlight = { id: swingVideoId, promise };
+  return promise;
+}
+
+export function isAnalysing() { return !!inFlight; }
+
+async function runAnalysis(swingVideoId, { onStage, signal, candidateIndex = 0 } = {}) {
   const started = performance.now();
   const timing = { modelMs: null, coarseMs: null, denseMs: null, totalMs: null, framesAnalysed: 0 };
   const stage = (s, extra) => onStage?.(s, extra);

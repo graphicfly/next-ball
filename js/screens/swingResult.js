@@ -29,6 +29,7 @@ const FAIL_COPY = {
   media_missing: 'This video is no longer stored on this device.',
   engine_load_failed: "The analysis engine couldn't load. Check your connection and try again.",
   cancelled: 'Analysis cancelled.',
+  busy: 'Another swing is being analyzed. Wait for it to finish, then try again.',
   analysis_failed: "That swing couldn't be analyzed.",
 };
 

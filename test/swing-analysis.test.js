@@ -6,7 +6,8 @@ import { resetDB } from './setup.js';
 import { LM, CONFIDENCE, CAPABILITY, assessQuality, effectiveFps, groupVisibility, roundForConfidence } from '../js/swingEvidence.js';
 import { detectPhases } from '../js/swingPhases.js';
 import { measureSwing, buildObservations, topObservation } from '../js/swingMeasure.js';
-import { buildEvidence, findCandidates } from '../js/swingAnalysis.js';
+import { buildEvidence, findCandidates, analyzeSwing, isAnalysing } from '../js/swingAnalysis.js';
+import * as db from '../js/db.js';
 
 // The deterministic evidence layer.
 //
@@ -636,4 +637,40 @@ test('the result leads with the tracking problem, not with silence', () => {
   const top = topObservation([], [], q);
   assert.match(top.text, /could not be tracked steadily/);
   assert.equal(top.kind, 'limitation');
+});
+
+describe('Only one analysis runs at a time', () => {
+  // The pose landmarker is a module singleton. Two overlapping runs do not
+  // duplicate work, they interleave on one instance and corrupt each
+  // other's frames — so this is a correctness guard, not a nicety.
+  test('a second request for the same swing joins the first', async () => {
+    resetDB();
+    const v = db.createSwingVideo({ media_ref: 'media:a', camera_view: 'down_the_line' });
+    // No media is stored, so the run fails fast and predictably.
+    const [a, b] = await Promise.all([
+      analyzeSwing(v.swing_video_id),
+      analyzeSwing(v.swing_video_id),
+    ]);
+    assert.equal(a, b, 'a double tap gets the one run, not two');
+  });
+
+  test('a request for a different swing is refused, not queued', async () => {
+    resetDB();
+    const one = db.createSwingVideo({ media_ref: 'media:a', camera_view: 'down_the_line' });
+    const two = db.createSwingVideo({ media_ref: 'media:b', camera_view: 'down_the_line' });
+    const first = analyzeSwing(one.swing_video_id);
+    const second = await analyzeSwing(two.swing_video_id);
+    assert.equal(second.ok, false);
+    assert.equal(second.reason, 'busy', 'the caller is told, not left hanging');
+    await first;
+  });
+
+  test('the lock is released after a run fails', async () => {
+    resetDB();
+    const v = db.createSwingVideo({ media_ref: 'media:a', camera_view: 'down_the_line' });
+    await analyzeSwing(v.swing_video_id);
+    assert.equal(isAnalysing(), false, 'a failed run must not wedge the engine shut');
+    const again = await analyzeSwing(v.swing_video_id);
+    assert.notEqual(again.reason, 'busy');
+  });
 });
