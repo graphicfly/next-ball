@@ -35,6 +35,9 @@ export const STAGE = {
 // this turning ~87 s of work into 11 s + 2.6 s, which is why it is the
 // architecture and not an optimisation (§3).
 const COARSE_STEP = 6;
+// 200 ms between coarse samples — what COARSE_STEP used to work out to at
+// 30 fps, now stated directly so it no longer moves with the file.
+const COARSE_STRIDE_MS = 200;
 const DENSE_PADDING_S = 0.6;   // runway kept either side of a detected swing
 const MIN_CANDIDATE_GAP_S = 1.5;
 
@@ -73,7 +76,10 @@ export function findCandidates(coarseSeries) {
   if (!clipScale) return [];
 
   const speeds = [];
-  for (let i = 1; i < pts.length; i++) {
+  // Skips the first delta for the same reason phase detection does: the
+  // opening frame of a pass is the estimator acquiring the subject, and the
+  // jump away from it is not movement.
+  for (let i = 2; i < pts.length; i++) {
     const a = bodyPoint(pts[i - 1]);
     const b = bodyPoint(pts[i]);
     const dt = (pts[i].timeMs - pts[i - 1].timeMs) / 1000;
@@ -115,9 +121,11 @@ export function findCandidates(coarseSeries) {
 
 // A golfer swinging stays about the same distance from the camera, so their
 // apparent size barely changes. Beyond this, the body is either approaching
-// the camera or not being tracked as one body — and on real range footage
-// that produced a head travelling three shoulder widths.
-export const MAX_SCALE_DRIFT = 1.9;
+// the camera or not being tracked as one body.
+//
+// Calibrated on two real clips: a well-framed face-on swing measures 1.12,
+// and footage of a golfer walking toward the camera measures 1.89.
+export const MAX_SCALE_DRIFT = 1.5;
 
 // Apparent body size across a window, as a ratio of high to low shoulder
 // width. A steady swing sits near 1.
@@ -141,12 +149,34 @@ function medianScale(pts) {
   return v.length ? v[v.length >> 1] : 0;
 }
 
-// Shoulder separation: the body's own ruler, used to make speeds and
-// distances independent of how far away the golfer stands.
+// The body's own ruler: shoulders to ankles, measured vertically.
+//
+// NOT shoulder width, which was the first attempt and was wrong. Shoulder
+// width collapses as the shoulders turn, so in a face-on swing it varies by
+// more than 3x through an ordinary backswing — the metric was reading the
+// golfer's rotation and calling it camera instability. On real footage it
+// could not tell a good clip (3.21) from an unusable one (2.98), because it
+// was measuring the swing rather than the framing.
+//
+// Vertical extent barely moves when the body turns, and does move when the
+// golfer walks toward the camera, which is exactly the distinction wanted:
+// the same two clips measure 1.12 and 1.89.
 function frameScale(frame) {
-  const l = frame?.landmarks?.[11], r = frame?.landmarks?.[12];
-  if (!l || !r) return 0;
-  return Math.hypot(l.x - r.x, l.y - r.y);
+  const l = frame?.landmarks;
+  if (!l) return 0;
+  const shoulders = midpoint(l[11], l[12]);
+  const ankles = midpoint(l[27], l[28]);
+  if (shoulders && ankles) return Math.abs(ankles.y - shoulders.y);
+  // Feet out of shot: fall back to the hips, which is a shorter ruler but
+  // still a vertical one.
+  const hips = midpoint(l[23], l[24]);
+  if (shoulders && hips) return Math.abs(hips.y - shoulders.y);
+  return 0;
+}
+
+function midpoint(a, b) {
+  if (!a || !b) return null;
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
 function bodyPoint(frame) {
@@ -266,7 +296,9 @@ async function runAnalysis(swingVideoId, { onStage, signal, candidateIndex = 0 }
     try {
       stage(STAGE.FINDING_SWINGS);
       const t1 = performance.now();
-      const coarse = await pose.extractSeries(url, { step: COARSE_STEP, signal, onProgress: (p) => stage(STAGE.FINDING_SWINGS, p) });
+      // A fixed interval, so the scan costs the same whatever the file's
+      // frame rate is. Locating a swing needs coverage, not resolution.
+      const coarse = await pose.extractSeries(url, { strideMs: COARSE_STRIDE_MS, signal, onProgress: (p) => stage(STAGE.FINDING_SWINGS, p) });
       timing.coarseMs = Math.round(performance.now() - t1);
       if (signal?.aborted) return fail('cancelled', timing, started);
 
@@ -276,7 +308,11 @@ async function runAnalysis(swingVideoId, { onStage, signal, candidateIndex = 0 }
       stage(STAGE.ANALYZING_MOVEMENT);
       const t2 = performance.now();
       const dense = await pose.extractSeries(url, {
+        // Every frame the file actually holds. At 60 fps this is twice the
+        // work of 30 and twice the temporal detail — which is the whole
+        // reason tempo becomes available.
         step: 1,
+        fps: video.fps,
         startMs: chosen?.start_ms ?? 0,
         endMs: chosen?.end_ms ?? null,
         signal,

@@ -20,11 +20,27 @@ export const EXACTNESS = { EXACT: 'exact', APPROXIMATE: 'approximate', UNAVAILAB
 // Midpoint of a landmark pair, or null when neither is visible enough to
 // trust. Returning null rather than a default is deliberate: an invented
 // coordinate propagates silently into every measurement downstream.
+// Phase detection accepts a lower-confidence landmark than measurement
+// does, and deliberately.
+//
+// Timing asks WHERE a joint was; measurement asks how far it travelled and
+// stakes a number on the answer. A wrist blurred through impact scores
+// poorly for visibility while still being positioned about right, which is
+// all that locating the top of the backswing requires. Holding both to
+// VISIBLE meant hands failed the 60% coverage test on an ordinary 60 fps
+// swing (39%), detection fell back to the shoulder midpoint — which barely
+// translates at all while the shoulders turn — and every phase landed in
+// the wrong place.
+//
+// Measurement confidence still uses VISIBLE. This floor only decides what
+// may be timed.
+const TIMING_VISIBLE = 0.3;
+
 function midpoint(frame, aIdx, bIdx) {
   const a = frame.landmarks?.[aIdx];
   const b = frame.landmarks?.[bIdx];
-  const aOk = (a?.visibility ?? 0) >= VISIBLE;
-  const bOk = (b?.visibility ?? 0) >= VISIBLE;
+  const aOk = (a?.visibility ?? 0) >= TIMING_VISIBLE;
+  const bOk = (b?.visibility ?? 0) >= TIMING_VISIBLE;
   if (aOk && bOk) return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, vis: Math.min(a.visibility, b.visibility) };
   if (aOk) return { x: a.x, y: a.y, vis: a.visibility * 0.7 };
   if (bOk) return { x: b.x, y: b.y, vis: b.visibility * 0.7 };
@@ -44,16 +60,34 @@ function track(series, pick) {
 // Speed between consecutive visible samples, in normalised units per
 // second. Timing comes from real timestamps, never from frame index over
 // nominal fps — the footage is variable frame rate (§4).
+// Speed between consecutive tracked points.
+//
+// The FIRST measurable delta is discarded. The pose estimator carries
+// temporal state between frames, and the opening frame of an extraction
+// pass has none — its estimate settles on the next frame or two, and the
+// jump between them is acquisition, not movement. On a real 60 fps swing
+// that artifact measured 0.89 against a true swing peak of 0.75, so it won
+// the "fastest moment" outright and collapsed every phase onto the first
+// frame of the window. It is not a small error to smooth over; it is not a
+// measurement at all.
+const ACQUISITION_SAMPLES = 1;
+
 function speedSeries(points) {
   const out = new Array(points.length).fill(null);
   let prev = null;
   let prevI = -1;
+  let measured = 0;
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
     if (!p) continue;
     if (prev) {
       const dt = (p.t - prev.t) / 1000;
-      if (dt > 0) out[i] = { t: p.t, v: Math.hypot(p.x - prev.x, p.y - prev.y) / dt, from: prevI, to: i };
+      if (dt > 0) {
+        measured += 1;
+        if (measured > ACQUISITION_SAMPLES) {
+          out[i] = { t: p.t, v: Math.hypot(p.x - prev.x, p.y - prev.y) / dt, from: prevI, to: i };
+        }
+      }
     }
     prev = p; prevI = i;
   }
@@ -196,17 +230,52 @@ export function detectPhases(series, { cameraView = 'unknown' } = {}) {
 
 // The last settled frame within a bounded lookback before the top. Bounded
 // so that a walk-up, a practice swing or a long wait cannot become address.
+// Address is the stillness BEFORE the backswing, not the stillness at the
+// top of it.
+//
+// Walking back from the top and stopping at the first quiet frame finds the
+// top itself every time — the hands are motionless there by definition, so
+// address landed one frame before the top and the backswing measured 0.02
+// seconds. The search has to cross the backswing first: skip back over the
+// sustained motion, and only then look for sustained quiet.
+//
+// "Sustained" is measured in milliseconds rather than frames so that the
+// same swing reads the same at 30 and at 60 fps.
+const SUSTAINED_MS = 100;
+
 function findAddress(speed, series, topIdx, quiet, lookbackMs) {
   if (topIdx == null) return null;
   const topTime = series[topIdx]?.timeMs ?? 0;
-  let best = null;
-  for (let i = topIdx - 1; i >= 0; i--) {
-    const t = series[i]?.timeMs;
+  const at = (i) => series[i]?.timeMs;
+  const moving = (i) => { const s = speed[i]; return !!s && s.v > quiet; };
+
+  // 1. Walk back over the quiet at the top until real motion resumes — the
+  //    backswing, seen in reverse.
+  let i = topIdx - 1;
+  let sawMotion = false;
+  for (; i >= 0; i--) {
+    const t = at(i);
     if (t == null) continue;
     if (topTime - t > lookbackMs) break;
-    const s = speed[i];
-    // Settled, or not yet moving at all.
-    if (!s || s.v <= quiet) { best = i; break; }
+    if (moving(i)) { sawMotion = true; break; }
+  }
+
+  let best = null;
+  if (sawMotion) {
+    // 2. Now find where that motion began: the last frame of a quiet run
+    //    lasting at least SUSTAINED_MS, which is the golfer standing still
+    //    over the ball.
+    let quietSince = null;
+    for (; i >= 0; i--) {
+      const t = at(i);
+      if (t == null) continue;
+      if (topTime - t > lookbackMs) break;
+      if (moving(i)) { quietSince = null; continue; }
+      if (quietSince == null) quietSince = t;
+      if (quietSince - t >= SUSTAINED_MS) { best = i + 1; break; }
+    }
+    // Quiet that runs to the edge of the lookback is still address.
+    if (best == null && quietSince != null) best = i + 1;
   }
   // Nothing settled inside the lookback: fall back to its far edge rather
   // than reaching back to the start of the clip.

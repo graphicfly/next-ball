@@ -19,7 +19,7 @@ import { LM, VISIBLE, CONFIDENCE, CAPABILITY, supportLevel, roundForConfidence, 
 // forced on hand-derived measurements in Down-the-Line.
 // Mirrors MAX_SCALE_DRIFT in swingAnalysis.js, kept here so this module
 // stays independent of where the swing was located.
-export const TRACKING_DRIFT_LIMIT = 1.9;
+export const TRACKING_DRIFT_LIMIT = 1.5;
 
 const MATRIX = {
   head_lateral:      { face_on: 'reliable',    down_the_line: 'approximate' },
@@ -61,6 +61,28 @@ function shoulderWidth(frames) {
   if (!widths.length) return null;
   widths.sort((a, b) => a - b);
   return widths[Math.floor(widths.length / 2)];
+}
+
+// Vertical extent, shoulders to ankles — the rotation-invariant ruler used
+// to judge whether a frame shows the same body at the same distance. Falls
+// back to the hips when the feet are out of shot.
+function frameExtent(f) {
+  const sh = midOf(pt(f, LM.leftShoulder), pt(f, LM.rightShoulder));
+  const an = midOf(pt(f, LM.leftAnkle), pt(f, LM.rightAnkle));
+  if (sh && an) return Math.abs(an.y - sh.y);
+  const hp = midOf(pt(f, LM.leftHip), pt(f, LM.rightHip));
+  if (sh && hp) return Math.abs(hp.y - sh.y);
+  return 0;
+}
+
+function midOf(a, b) {
+  if (!a || !b) return null;
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function bodyExtent(frames) {
+  const v = frames.map(frameExtent).filter((x) => x > 0.01).sort((a, b) => a - b);
+  return v.length ? v[Math.floor(v.length / 2)] : null;
 }
 
 function measurement(key, { value, unit, confidence, note = null, method }) {
@@ -120,13 +142,14 @@ export function measureSwing(series, phases, quality, { cameraView = 'unknown', 
   // The tell is body SCALE: a golfer's shoulder width cannot change much
   // between adjacent frames, so a frame whose width departs sharply from
   // the clip's median is a different body or a broken detection.
-  const median = shoulderWidth(allFrames);
+  // Frames are kept or dropped on VERTICAL body extent, not shoulder width.
+  // Shoulder width collapses as the shoulders turn, so filtering on it threw
+  // away most of a real face-on swing and left too little to measure.
+  const median = bodyExtent(allFrames);
   const frames = median
     ? allFrames.filter((f) => {
-      const l = pt(f, LM.leftShoulder), r = pt(f, LM.rightShoulder);
-      if (!l || !r) return false;
-      const w = Math.hypot(l.x - r.x, l.y - r.y);
-      return w > median * 0.6 && w < median * 1.6;
+      const e = frameExtent(f);
+      return e > 0 && e > median * 0.6 && e < median * 1.6;
     })
     : allFrames;
   if (!frames.length) return out;
@@ -271,7 +294,16 @@ export function measureSwing(series, phases, quality, { cameraView = 'unknown', 
     method: 'address_to_finish_timestamps',
   }));
 
-  const backswingMs = address && top ? top.timeMs - address.timeMs : null;
+  // A phase-detection failure produces a duration, not an error, and the
+  // duration looks exactly like a measurement. A backswing of 17 ms once
+  // reached the screen at HIGH confidence with a tempo of 0.0:1 beside it.
+  // No golfer takes the club back in a sixtieth of a second, so a timing
+  // outside human range is treated as evidence that the phases are wrong.
+  const PLAUSIBLE_BACKSWING_MS = [200, 3000];
+  const PLAUSIBLE_DOWNSWING_MS = [100, 1500];
+  const plausible = (v, [lo, hi]) => (v != null && v >= lo && v <= hi ? v : null);
+
+  const backswingMs = plausible(address && top ? top.timeMs - address.timeMs : null, PLAUSIBLE_BACKSWING_MS);
   out.push(measurement('backswing_ms', {
     value: backswingMs, unit: 'ms',
     confidence: supportFor('backswing_ms', ['shoulders'], true),
@@ -279,7 +311,7 @@ export function measureSwing(series, phases, quality, { cameraView = 'unknown', 
     note: needsFull ? 'Withheld below 60 fps.' : null,
   }));
 
-  const downswingMs = top && impact ? impact.timeMs - top.timeMs : null;
+  const downswingMs = plausible(top && impact ? impact.timeMs - top.timeMs : null, PLAUSIBLE_DOWNSWING_MS);
   out.push(measurement('downswing_ms', {
     value: downswingMs, unit: 'ms',
     confidence: supportFor('downswing_ms', ['shoulders'], true),

@@ -101,7 +101,7 @@ function seekTo(video, seconds) {
 // decoded frame the browser hands back — which has rotation metadata
 // applied (§5). Container dimensions are recorded separately on the video
 // and are never used for analysis coordinates.
-export async function extractSeries(url, { step = 1, startMs = 0, endMs = null, signal, onProgress } = {}) {
+export async function extractSeries(url, { strideMs = null, step = 1, fps = null, startMs = 0, endMs = null, signal, onProgress } = {}) {
   if (!landmarker) throw new Error('pose engine not initialised');
 
   const video = decoder || document.createElement('video');
@@ -123,10 +123,21 @@ export async function extractSeries(url, { step = 1, startMs = 0, endMs = null, 
 
   const from = Math.max(0, (startMs || 0) / 1000);
   const to = endMs != null ? Math.min(duration, endMs / 1000) : duration;
-  // Nominal only, and only to decide where to sample. Every recorded
-  // timestamp comes from the video itself.
-  const nominalFps = 30;
-  const stride = (step / nominalFps);
+  // How far apart to sample, in seconds. This is the single most
+  // consequential number in the module: it decides the effective frame
+  // rate of the whole analysis.
+  //
+  // It used to be step/30 with 30 hardcoded, which silently threw away
+  // every second frame of 60 fps footage and made tempo unreachable no
+  // matter what the golfer recorded. The caller now says what it wants —
+  // a fixed interval for the coarse scan, the file's real frame period for
+  // the dense pass. 30 remains the fallback only when nothing is known.
+  //
+  // Every recorded timestamp still comes from the video's own clock, never
+  // from this.
+  const stride = strideMs != null
+    ? (strideMs / 1000)
+    : (step / (Number.isFinite(fps) && fps > 0 ? fps : 30));
   const planned = Math.max(1, Math.ceil((to - from) / stride));
 
   const canvas = document.createElement('canvas');

@@ -563,18 +563,22 @@ describe('Measurements span the swing, not the window around it', () => {
 
 describe('Pose jumps are filtered, not measured', () => {
   // MediaPipe tracks one person. On range footage it can latch onto a
-  // golfer in a neighbouring bay, or lose the subject and snap back. Those
-  // frames are not the golfer moving, and on real footage they produced a
-  // head travel of 2.9 shoulder widths — an impossible number wearing the
-  // clothes of a measurement.
+  // golfer in a neighbouring bay, or lose the subject and snap back.
+  //
+  // What marks those frames is the body's VERTICAL EXTENT changing —
+  // shoulders to ankles. Shoulder width was the first thing tried and was
+  // wrong: it collapses as the shoulders turn, so it flagged an ordinary
+  // face-on backswing as a tracking failure while telling a good clip
+  // (3.21) from an unusable one (2.98) not at all.
   function withPoseJumps(swing, count = 8) {
     return swing.map((f, i) => {
       if (i % 7 !== 0 || count-- <= 0 || !f.landmarks) return f;
       const lm = f.landmarks.map((l) => ({ ...l }));
-      // A different, much smaller body somewhere else in frame.
-      lm[LM.leftShoulder] = { ...lm[LM.leftShoulder], x: 0.05, y: 0.30 };
-      lm[LM.rightShoulder] = { ...lm[LM.rightShoulder], x: 0.11, y: 0.30 };
-      lm[LM.nose] = { ...lm[LM.nose], x: 0.08, y: 0.10 };
+      // A different, much smaller body: half the height, elsewhere in frame.
+      for (const j of [LM.leftShoulder, LM.rightShoulder]) lm[j] = { ...lm[j], y: 0.40 };
+      for (const j of [LM.leftAnkle, LM.rightAnkle]) lm[j] = { ...lm[j], y: 0.55 };
+      for (const j of [LM.leftHip, LM.rightHip]) lm[j] = { ...lm[j], y: 0.48 };
+      lm[LM.nose] = { ...lm[LM.nose], y: 0.34 };
       return { ...f, landmarks: lm };
     });
   }
@@ -589,21 +593,28 @@ describe('Pose jumps are filtered, not measured', () => {
     }
   });
 
-  test('badly unstable tracking withholds spatial measurements entirely', () => {
-    // Over 40% of frames showing a different body is not a measurement
-    // problem to soften — it is a measurement that should not be made.
-    const s = withPoseJumps(makeSwing({ fps: 30 }), 999).map((f, i) =>
-      (i % 2 === 0 && f.landmarks ? {
-        ...f,
-        landmarks: f.landmarks.map((l, j) => (j === LM.leftShoulder ? { ...l, x: 0.02 } : j === LM.rightShoulder ? { ...l, x: 0.06 } : l)),
-      } : f));
-    const q = assessQuality(s, { fps: 30, cameraView: 'face_on' });
+  test('a turning body is NOT mistaken for a tracking failure', () => {
+    // The regression that matters most: shoulders narrowing through a
+    // backswing is the swing happening, not the camera moving.
+    const s = makeSwing({ fps: 60 }).map((f, i) => {
+      if (!f.landmarks) return f;
+      const lm = f.landmarks.map((l) => ({ ...l }));
+      // Collapse shoulder width to a third through the middle of the swing.
+      const turn = Math.sin((i / s0Len(makeSwing({ fps: 60 }))) * Math.PI);
+      const cx = (lm[LM.leftShoulder].x + lm[LM.rightShoulder].x) / 2;
+      for (const j of [LM.leftShoulder, LM.rightShoulder]) {
+        lm[j] = { ...lm[j], x: cx + (lm[j].x - cx) * (1 - 0.66 * turn) };
+      }
+      return { ...f, landmarks: lm };
+    });
+    const q = assessQuality(s, { fps: 60, cameraView: 'face_on' });
     const { phases } = detectPhases(s);
-    const ms = measureSwing(s, phases, q, { cameraView: 'face_on' });
-    const spatial = ms.filter((m) => m.unit === 'shoulder_widths');
-    assert.ok(spatial.every((m) => m.withheld), 'spatial claims are withheld when tracking is unstable');
+    const ms = measureSwing(s, phases, q, { cameraView: 'face_on', trackingDrift: 1.1 });
+    assert.ok(ms.some((m) => !m.withheld), 'a rotating golfer must still be measurable');
   });
 });
+
+function s0Len(a) { return a.length || 1; }
 
 describe('Unsteady tracking is reported, not quietly measured', () => {
   test('withholds every measurement and explains why', () => {
@@ -672,5 +683,59 @@ describe('Only one analysis runs at a time', () => {
     assert.equal(isAnalysing(), false, 'a failed run must not wedge the engine shut');
     const again = await analyzeSwing(v.swing_video_id);
     assert.notEqual(again.reason, 'busy');
+  });
+});
+
+describe('Impossible swing timings are not reported as measurements', () => {
+  // A phase-detection failure yields a duration, and a duration is
+  // indistinguishable from a measurement once it reaches the screen. This
+  // happened on real footage: a 17 ms backswing shipped at HIGH confidence
+  // with a 0.0:1 tempo next to it.
+  //
+  // Phases resolve through frame_index into the series, so the fixture
+  // picks indices by the timestamp it wants rather than inventing times.
+  function fixture(backMs, downMs) {
+    const series = makeSwing({ fps: 240 });
+    const t0 = series[0].timeMs;
+    const idxAt = (ms) => {
+      let best = 0;
+      for (let i = 0; i < series.length; i++) {
+        if (Math.abs(series[i].timeMs - (t0 + ms)) < Math.abs(series[best].timeMs - (t0 + ms))) best = i;
+      }
+      return best;
+    };
+    const iTop = idxAt(backMs);
+    const iImpact = idxAt(backMs + downMs);
+    const actualBack = series[iTop].timeMs - t0;
+    const actualDown = series[iImpact].timeMs - series[iTop].timeMs;
+    return {
+      series,
+      quality: assessQuality(series, { fps: 240, cameraView: 'face_on' }),
+      actualBack,
+      actualDown,
+      phases: [
+        { phase: 'address', time_ms: t0, frame_index: 0, exactness: 'exact' },
+        { phase: 'top', time_ms: series[iTop].timeMs, frame_index: iTop, exactness: 'exact' },
+        { phase: 'impact', time_ms: series[iImpact].timeMs, frame_index: iImpact, exactness: 'exact' },
+        { phase: 'finish', time_ms: series[series.length - 1].timeMs, frame_index: series.length - 1, exactness: 'exact' },
+      ],
+    };
+  }
+
+  test('a 17ms backswing is withheld, not published', () => {
+    const f = fixture(17, 400);
+    assert.ok(f.actualBack < 200, `fixture must actually be implausible, got ${f.actualBack}ms`);
+    const ms = measureSwing(f.series, f.phases, f.quality, { cameraView: 'face_on', trackingDrift: 1.1 });
+    assert.equal(ms.find((m) => m.key === 'backswing_ms').withheld, true);
+    assert.equal(ms.find((m) => m.key === 'tempo_ratio').withheld, true, 'a tempo built on it goes too');
+  });
+
+  test('a human backswing is kept', () => {
+    const f = fixture(850, 280);
+    assert.ok(f.actualBack >= 200, `fixture must be plausible, got ${f.actualBack}ms`);
+    const ms = measureSwing(f.series, f.phases, f.quality, { cameraView: 'face_on', trackingDrift: 1.1 });
+    const back = ms.find((m) => m.key === 'backswing_ms');
+    assert.equal(back.withheld, false, 'an ordinary backswing must survive the guard');
+    assert.equal(back.value, Math.round(f.actualBack * 100) / 100);
   });
 });
