@@ -21,6 +21,9 @@ import { renderDevMedia } from './screens/devMedia.js';
 import { renderTrends } from './screens/trends.js';
 import { renderProgress } from './screens/progress.js';
 import { renderSwingCapture } from './screens/swingCaptureScreen.js';
+import { renderSwingPreview } from './screens/swingPreview.js';
+import { renderSwingLab } from './screens/swingLab.js';
+import { renderSwingAnalyze, renderSwingResult } from './screens/swingResult.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getActiveRound, getSettings } from './db.js';
 import { enableWakeLock } from './wakeLock.js';
@@ -72,6 +75,10 @@ const routes = [
   // Swing Lab capture: a single-task screen, so no bottom nav — the camera
   // is open and every exit must close it.
   { pattern: /^#\/swing\/capture$/, render: () => renderSwingCapture(root) },
+  { pattern: /^#\/swing\/preview\/([^/]+)$/, render: (m) => renderSwingPreview(root, m[1]) },
+  { pattern: /^#\/swing\/analyze\/([^/]+)$/, render: (m) => renderSwingAnalyze(root, m[1]) },
+  { pattern: /^#\/swing\/result\/([^/]+)$/, render: (m) => renderSwingResult(root, m[1]) },
+  { pattern: /^#\/swing-lab$/, render: () => renderSwingLab(root) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];

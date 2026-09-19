@@ -231,10 +231,17 @@ export function renderActive(root) {
           // One control, two states. A swing waiting for its shot says so
           // and opens its preview; otherwise this records a new one.
           const pending = db.getPendingSwingVideo(session.session_id);
-          const captured = pending || (getLastCapturedSwing() ? db.getSwingVideo(getLastCapturedSwing()) : null);
-          if (captured && captured.association_state === 'pending') {
+          if (pending) {
             return `<button class="secondary-action captured" id="capturedBtn" aria-label="Swing captured, open preview">
               <span class="secondary-action-badge">${icon(ICON_RECORD)}<span class="secondary-dot" aria-hidden="true"></span></span><span>Swing captured</span></button>`;
+          }
+          // Straight after a shot linked a swing, the action becomes the
+          // one thing worth doing next — without ever requiring it (§15).
+          const lastId = getLastCapturedSwing();
+          const linked = lastId ? db.getSwingVideo(lastId) : null;
+          if (linked && linked.association_state === 'linked') {
+            return `<button class="secondary-action captured" id="analyzeLinkedBtn" aria-label="Swing linked, analyze it">
+              <span class="secondary-action-badge">${icon(ICON_RECORD)}</span><span>Swing linked</span></button>`;
           }
           return `<button class="secondary-action" id="recordBtn" aria-label="Record a swing">${icon(ICON_RECORD)}<span>Record</span></button>`;
         })()}
@@ -280,6 +287,12 @@ export function renderActive(root) {
   qs('#capturedBtn', root)?.addEventListener('click', () => {
     const pending = db.getPendingSwingVideo(session.session_id);
     if (pending) location.hash = `#/swing/preview/${pending.swing_video_id}`;
+  });
+  qs('#analyzeLinkedBtn', root)?.addEventListener('click', () => {
+    const id = getLastCapturedSwing();
+    if (!id) return;
+    // An existing analysis reopens; otherwise this starts one.
+    location.hash = db.getLatestSwingAnalysis(id) ? `#/swing/result/${id}` : `#/swing/analyze/${id}`;
   });
 
   qs('#editLastBtn', root).addEventListener('click', () => {

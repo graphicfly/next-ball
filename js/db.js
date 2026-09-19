@@ -1925,6 +1925,9 @@ export function createSwingAnalysis(fields = {}) {
     measurements: fields.measurements ?? [],
     observations: fields.observations ?? [],
     signals: fields.signals ?? null,
+    // A downsampled skeleton for the overlay — see buildPoseFrames. The
+    // full series is large and recomputable, so it is not stored.
+    pose_frames: fields.pose_frames ?? [],
 
     // Context is carried for provenance and for the future interpretation
     // layer. It never influenced a measurement: pose is computed from the
