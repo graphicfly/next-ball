@@ -1,5 +1,5 @@
 import './setup.js';
-import { test, describe } from 'node:test';
+import { test, describe, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { resetDB } from './setup.js';
@@ -310,5 +310,54 @@ describe('What the camera negotiated is recorded', () => {
     localStorage.setItem('rangelog_index_v1', JSON.stringify(raw));
     db.__resetForTests();
     assert.equal(db.getSwingVideo(v.swing_video_id).capture_settings, null);
+  });
+});
+
+describe('Arming waits for the golfer to settle', () => {
+  // At the range the watcher fired on the walk-in: the eight second window
+  // was spent on the approach and the recording had finished before the
+  // swing started. Movement only counts once the scene has gone quiet.
+  let MOTION_TUNING;
+  before(async () => { ({ MOTION_TUNING } = await import('../js/swingCapture.js')); });
+
+  test('a settle period is required, and it is about a second', () => {
+    assert.ok(MOTION_TUNING.settleSamples > 0, 'there is a settle requirement at all');
+    const settleMs = MOTION_TUNING.settleSamples * MOTION_TUNING.intervalMs;
+    // Long enough to outlast someone walking in, short enough not to feel
+    // broken while standing over the ball.
+    assert.ok(settleMs >= 700 && settleMs <= 1600, `settle window was ${settleMs}ms`);
+  });
+
+  test('the swing trigger is still fast once settled', () => {
+    const triggerMs = MOTION_TUNING.consecutive * MOTION_TUNING.intervalMs;
+    assert.ok(triggerMs <= 250, `trigger took ${triggerMs}ms, which would clip the takeaway`);
+  });
+});
+
+describe('The linked-swing card belongs to the shot that is current', () => {
+  // A stale card advertised the previous ball's swing over the next one,
+  // because nothing ever cleared it. Logging the next shot dismisses it —
+  // but only once it is linked, since that same tap is what links a
+  // pending swing in the first place.
+  test('a linked swing is cleared, a pending one is not', async () => {
+    const db = await resetDB();
+    const { setLastCapturedSwing, getLastCapturedSwing, clearLastCapturedSwing } = await import('../js/state.js');
+
+    const pending = db.createSwingVideo({ media_ref: 'm1', association_state: 'pending' });
+    setLastCapturedSwing(pending.swing_video_id);
+    const dismissIfStale = () => {
+      const id = getLastCapturedSwing();
+      if (!id) return;
+      const v = db.getSwingVideo(id);
+      if (v && v.association_state === 'linked') clearLastCapturedSwing();
+    };
+
+    dismissIfStale();
+    assert.equal(getLastCapturedSwing(), pending.swing_video_id, 'a pending swing must survive the tap that links it');
+
+    const linked = db.createSwingVideo({ media_ref: 'm2', association_state: 'linked', shot_id: 's1' });
+    setLastCapturedSwing(linked.swing_video_id);
+    dismissIfStale();
+    assert.equal(getLastCapturedSwing(), null, 'a swing already tied to a finished shot is stale');
   });
 });

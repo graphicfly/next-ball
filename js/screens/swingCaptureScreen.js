@@ -16,6 +16,13 @@ import { buildRecordingContext } from '../swingContext.js';
 
 const STATE = { SETUP: 'setup', ARMED: 'armed', RECORDING: 'recording', SAVING: 'saving' };
 
+// Front by default. The rear camera takes the better picture, but it faces
+// away from the screen, so the golfer is setting up blind and reaching round
+// the phone for controls they cannot see. A slightly softer image you can
+// actually frame beats a sharper one you cannot.
+const DEFAULT_FACING = 'user';
+const FACING_COPY = { user: 'Front camera', environment: 'Rear camera' };
+
 const ERROR_COPY = {
   denied: 'Camera access is off for Next Ball. Turn it on in Settings to record swings.',
   unavailable: 'No camera is available on this device.',
@@ -32,6 +39,7 @@ export function renderSwingCapture(root) {
 
   const club = session.current_club || session.default_club || '';
   let view = getSessionCameraView() || 'down_the_line';
+  let facing = db.getSettings().swing_camera_facing || DEFAULT_FACING;
   let state = getSessionCameraView() ? STATE.ARMED : STATE.SETUP;
   let stopWatching = null;
   let teardownDone = false;
@@ -83,6 +91,9 @@ export function renderSwingCapture(root) {
             </button>`).join('')}
         </div>
         <p class="capture-hint" id="viewHint">${escapeHtml(capture.VIEW_COPY[view].hint)}</p>
+        <button class="capture-link capture-flip" id="flipBtn" aria-label="Switch camera">
+          ${escapeHtml(FACING_COPY[facing])} &middot; switch
+        </button>
         <button class="btn btn-primary btn-hero" id="useSetupBtn">Use This Setup</button>
         <button class="capture-cancel" id="cancelBtn">Cancel</button>
       </div>
@@ -100,6 +111,16 @@ export function renderSwingCapture(root) {
       });
     });
 
+    qs('#flipBtn', root).addEventListener('click', async () => {
+      facing = facing === 'user' ? 'environment' : 'user';
+      // Remembered, because a golfer who props their phone one way props it
+      // that way all session.
+      db.updateSettings({ swing_camera_facing: facing });
+      const btn = qs('#flipBtn', root);
+      if (btn) btn.innerHTML = `${escapeHtml(FACING_COPY[facing])} &middot; switch`;
+      await startPreview();
+    });
+
     qs('#useSetupBtn', root).addEventListener('click', () => {
       setSessionCameraView(view);
       renderArmed();
@@ -109,7 +130,7 @@ export function renderSwingCapture(root) {
   }
 
   async function startPreview() {
-    const res = await capture.openCamera();
+    const res = await capture.openCamera({ facing });
     if (!res.ok) { showCameraError(res.reason); return; }
     const el = qs('#preview', root);
     if (!el) return;              // navigated away while the prompt was up
@@ -137,12 +158,12 @@ export function renderSwingCapture(root) {
         <div class="capture-context">${escapeHtml(capture.VIEW_COPY[view].label)}${club ? ` &middot; ${escapeHtml(club)}` : ''}</div>
         <div class="capture-center" role="status" aria-live="polite">
           <div class="capture-pulse" aria-hidden="true"><span></span></div>
-          <div class="capture-state ready">READY</div>
-          <p class="capture-copy">Step into position<br/>and take your swing.</p>
+          <div class="capture-state ready" id="armState">WAITING</div>
+          <p class="capture-copy" id="armCopy">Step into position<br/>and hold still.</p>
         </div>
       </div>
       <div class="capture-panel">
-        <p class="capture-hint">Starts when you move &middot;
+        <p class="capture-hint">Starts when you swing &middot;
           <button class="capture-link" id="changeSetupBtn">Change setup</button>
         </p>
         <button class="capture-cancel" id="cancelBtn">Cancel</button>
@@ -160,7 +181,7 @@ export function renderSwingCapture(root) {
   }
 
   async function armCamera() {
-    const res = await capture.openCamera();
+    const res = await capture.openCamera({ facing });
     if (!res.ok) { renderSetup(); setTimeout(() => showCameraError(res.reason), 0); return; }
     const el = qs('#preview', root);
     if (!el) return;
@@ -171,6 +192,14 @@ export function renderSwingCapture(root) {
       stopWatching = null;
       renderRecording();
     }, {
+      // The wait for stillness is deliberate, so it is shown rather than
+      // left looking like a frozen screen.
+      onSettled: () => {
+        const st = qs('#armState', root);
+        const cp = qs('#armCopy', root);
+        if (st) st.textContent = 'READY';
+        if (cp) cp.innerHTML = 'Take your swing.';
+      },
       // An arm left running is not an error; it just stops waiting.
       onTimeout: () => { toast('Recording cancelled'); exit(); },
     });
@@ -210,7 +239,7 @@ export function renderSwingCapture(root) {
   async function reattachPreview() {
     const el = qs('#preview', root);
     if (!el) return;
-    const res = await capture.openCamera();     // reuses the open stream
+    const res = await capture.openCamera({ facing });   // reuses the open stream
     if (res.ok) { el.srcObject = res.stream; try { await el.play(); } catch { /* preview only */ } }
   }
 

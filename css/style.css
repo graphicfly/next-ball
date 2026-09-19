@@ -4035,3 +4035,15 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 .analyze-progress { width: 70%; height: 4px; background: var(--color-surface-2); border-radius: 2px; overflow: hidden; }
 .analyze-progress > i { display: block; height: 100%; width: 0; background: var(--color-accent); transition: width var(--duration-slow) var(--ease-standard); }
 .analyze-fail { font-size: var(--text-title); font-weight: var(--weight-bold); color: var(--color-danger); }
+
+/* The camera chooser sits under the view hint, quieter than the primary
+   action but reachable without hunting for it. */
+.capture-flip {
+  display: block;
+  margin: 0.35rem auto 0.9rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+}
+.capture-flip:active { opacity: 1; }

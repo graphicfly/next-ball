@@ -7,7 +7,7 @@ import { startLocationResolution } from '../sessionLocation.js';
 import { openLocationSheet } from './locationSheet.js';
 import { openShotDrillSheet, openShotTrainingAidSheet, openShotSetupSheet, openShotTargetSheet } from './historyDetail.js';
 import { openEndSessionSheet } from './home.js';
-import { getLastCapturedSwing } from '../state.js';
+import { getLastCapturedSwing, clearLastCapturedSwing } from '../state.js';
 
 // Optional and secondary by construction: a range session that never
 // records must cost nothing extra, so nothing here loads the camera, the
@@ -264,6 +264,19 @@ export function renderActive(root) {
   qs('#settingsGearBtn', root).addEventListener('click', () => openSettingsSheet(root, session));
 
   qs('#logShotBtn', root)?.addEventListener('click', () => {
+    // Logging the NEXT ball dismisses the previous swing's card (§25.6):
+    // the thing you would do next is the thing that clears it.
+    //
+    // Only once that swing is LINKED, though. This same tap is what links
+    // a pending swing in the first place, so clearing unconditionally would
+    // destroy the card before it could ever appear. Linked means the swing
+    // already belongs to a shot that is finished with — which is exactly
+    // the stale card seen at the range, still advertising the last ball's
+    // swing over the next one.
+    if (getLastCapturedSwing()) {
+      const prev = db.getSwingVideo(getLastCapturedSwing());
+      if (prev && prev.association_state === 'linked') clearLastCapturedSwing();
+    }
     startNewShotDraft();
     setFlowReturn('#/active');
     location.hash = '#/log/strike';

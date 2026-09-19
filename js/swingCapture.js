@@ -41,6 +41,15 @@ const MOTION_FRACTION = 0.06;
 // start a recording.
 const MOTION_CONSECUTIVE = 2;
 
+// The golfer must be STILL before movement can start a recording.
+//
+// Without this the watcher fires on the first thing it sees, which is the
+// golfer walking into frame — so at the range the eight seconds were spent
+// on the walk-in and the recording had finished before the swing began.
+// Requiring roughly a second of stillness first means the trigger is the
+// swing, not the approach. 12 samples at 80 ms is about 0.96 s.
+const SETTLE_SAMPLES = 12;
+
 export const CAMERA_VIEWS = ['down_the_line', 'face_on'];
 
 export const VIEW_COPY = {
@@ -52,11 +61,22 @@ export const VIEW_COPY = {
 // explicit that the resulting media decides what capability the recording
 // has, and the spike found iOS reports frame rate unreliably. Whatever
 // arrives is measured afterwards and recorded as fact.
-function constraintsFor() {
+export const FACINGS = ['user', 'environment'];
+
+// Which camera, and why it is the golfer's choice.
+//
+// The rear camera gives the better picture, but it points away from the
+// screen — so the controls face the wrong way and the golfer cannot see
+// what is being filmed while setting up. The front camera solves that at
+// some cost in quality, and which trade is right depends on where the
+// phone is propped. Neither is correct for everyone, so neither is forced.
+function constraintsFor(facing) {
   return {
     audio: false,
     video: {
-      facingMode: { ideal: 'environment' },
+      // 'ideal' rather than 'exact': a device with one camera should still
+      // open it rather than fail.
+      facingMode: { ideal: FACINGS.includes(facing) ? facing : 'user' },
       width: { ideal: 1920 },
       height: { ideal: 1080 },
       frameRate: { ideal: 120, min: 30 },
@@ -84,8 +104,11 @@ function pickMimeType() {
 
 let stream = null;
 let recorder = null;
+let currentFacing = null;
 
 export function isStreaming() { return !!stream; }
+
+export function facing() { return currentFacing; }
 
 // Opens the camera. Only ever called from a user action.
 //
@@ -93,14 +116,19 @@ export function isStreaming() { return !!stream; }
 // an ordinary thing a phone does — permission refused, camera busy with
 // another app, no camera at all — and none of them may damage the range
 // session (§4).
-export async function openCamera() {
-  if (stream) return { ok: true, stream, reused: true };
+export async function openCamera({ facing = 'user' } = {}) {
+  if (stream && currentFacing === facing) return { ok: true, stream, reused: true, facing };
+  // Switching cameras means a new stream; the old one has to go first or
+  // iOS may refuse the second.
+  if (stream) closeCamera();
   if (!navigator.mediaDevices?.getUserMedia) return { ok: false, reason: 'unsupported' };
   try {
-    stream = await navigator.mediaDevices.getUserMedia(constraintsFor());
-    return { ok: true, stream };
+    stream = await navigator.mediaDevices.getUserMedia(constraintsFor(facing));
+    currentFacing = facing;
+    return { ok: true, stream, facing };
   } catch (err) {
     stream = null;
+    currentFacing = null;
     const name = err?.name || '';
     const reason = name === 'NotAllowedError' || name === 'SecurityError' ? 'denied'
       : name === 'NotFoundError' || name === 'OverconstrainedError' ? 'unavailable'
@@ -122,6 +150,7 @@ export function closeCamera() {
     }
     stream = null;
   }
+  currentFacing = null;
 }
 
 // What the camera actually gave us, as opposed to what was asked for.
@@ -163,13 +192,16 @@ export const MOTION_TUNING = {
   pixelThreshold: MOTION_PIXEL_THRESHOLD,
   fraction: MOTION_FRACTION,
   consecutive: MOTION_CONSECUTIVE,
+  settleSamples: SETTLE_SAMPLES,
   intervalMs: MOTION_INTERVAL_MS,
 };
 
-export function watchForSwingStart(video, onTrigger, { onTimeout } = {}) {
+export function watchForSwingStart(video, onTrigger, { onTimeout, onSettled } = {}) {
   let stopped = false;
   let previous = null;
   let consecutive = 0;
+  let quiet = 0;
+  let settled = false;
   const canvas = document.createElement('canvas');
   canvas.width = MOTION_SAMPLE_W;
   canvas.height = MOTION_SAMPLE_H;
@@ -183,8 +215,16 @@ export function watchForSwingStart(video, onTrigger, { onTimeout } = {}) {
       ctx.drawImage(video, 0, 0, MOTION_SAMPLE_W, MOTION_SAMPLE_H);
       const frame = ctx.getImageData(0, 0, MOTION_SAMPLE_W, MOTION_SAMPLE_H).data;
       if (previous) {
-        consecutive = isMotion(previous, frame) ? consecutive + 1 : 0;
-        if (consecutive >= MOTION_CONSECUTIVE) { stop(); onTrigger(); return; }
+        const moving = isMotion(previous, frame);
+        if (!settled) {
+          // Waiting for the scene to go quiet: the golfer arriving and
+          // taking their stance is movement, but it is not the swing.
+          quiet = moving ? 0 : quiet + 1;
+          if (quiet >= SETTLE_SAMPLES) { settled = true; onSettled?.(); }
+        } else {
+          consecutive = moving ? consecutive + 1 : 0;
+          if (consecutive >= MOTION_CONSECUTIVE) { stop(); onTrigger(); return; }
+        }
       }
       previous = frame;
     } catch { /* a frame we cannot read is simply skipped */ }
