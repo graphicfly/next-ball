@@ -3,8 +3,8 @@
 Work down this list in order. Items 1–4 happen before you leave.
 
 1. **Force-quit the installed app twice.** iOS keeps a service worker alive
-   across a single quit; the second launch is the one that picks up v87.
-   Confirm the build number reads **v87** on Settings before you drive off.
+   across a single quit; the second launch is the one that picks up v88.
+   Confirm the build number reads **v88** on Settings before you drive off.
 
 2. **Check free storage.** Settings shows what Swing Lab is holding. Video is
    the only thing in this app that can fill a phone, and iOS refuses
