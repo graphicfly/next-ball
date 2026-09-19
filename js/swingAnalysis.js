@@ -60,13 +60,25 @@ export function findCandidates(coarseSeries) {
   const pts = (coarseSeries || []).filter((f) => Array.isArray(f.landmarks));
   if (pts.length < 4) return [];
 
+  // Speed is measured in SHOULDER WIDTHS per second, against ONE robust
+  // scale for the clip rather than each frame's own.
+  //
+  // Landmarks are normalised to the frame, so the same motion registers
+  // larger the closer the golfer stands; a fixed body ruler makes the
+  // numbers mean the same thing from clip to clip. The ruler has to be the
+  // clip's median, though: on real range footage individual frames returned
+  // shoulder widths of 0.002, and dividing by those turned detection noise
+  // into speeds of 130 that buried every real swing.
+  const clipScale = medianScale(pts);
+  if (!clipScale) return [];
+
   const speeds = [];
   for (let i = 1; i < pts.length; i++) {
     const a = bodyPoint(pts[i - 1]);
     const b = bodyPoint(pts[i]);
     const dt = (pts[i].timeMs - pts[i - 1].timeMs) / 1000;
     if (!a || !b || dt <= 0) continue;
-    speeds.push({ timeMs: pts[i].timeMs, v: Math.hypot(b.x - a.x, b.y - a.y) / dt });
+    speeds.push({ timeMs: pts[i].timeMs, v: Math.hypot(b.x - a.x, b.y - a.y) / dt / clipScale });
   }
   if (!speeds.length) return [];
 
@@ -86,14 +98,55 @@ export function findCandidates(coarseSeries) {
     candidates.push({ peakMs: p.timeMs, peak: p.v });
   }
 
-  return candidates.map((c, i) => ({
-    index: i,
-    peak_ms: c.peakMs,
-    // A window wide enough to hold address through finish around the peak.
-    start_ms: Math.max(0, c.peakMs - (1.4 + DENSE_PADDING_S) * 1000),
-    end_ms: c.peakMs + (1.0 + DENSE_PADDING_S) * 1000,
-    strength: +(c.peak / vmax).toFixed(3),
-  }));
+  return candidates
+    .map((c, i) => ({
+      index: i,
+      peak_ms: c.peakMs,
+      // A window wide enough to hold address through finish around the peak.
+      start_ms: Math.max(0, c.peakMs - (1.4 + DENSE_PADDING_S) * 1000),
+      end_ms: c.peakMs + (1.0 + DENSE_PADDING_S) * 1000,
+      strength: +(c.peak / vmax).toFixed(3),
+    }))
+    // Candidates are never discarded for poor tracking — a swing the golfer
+    // knows they made should not vanish. The drift is carried instead, and
+    // the evidence layer decides what may honestly be claimed from it.
+    .map((w) => ({ ...w, scale_drift: scaleDrift(pts, w) }));
+}
+
+// A golfer swinging stays about the same distance from the camera, so their
+// apparent size barely changes. Beyond this, the body is either approaching
+// the camera or not being tracked as one body — and on real range footage
+// that produced a head travelling three shoulder widths.
+export const MAX_SCALE_DRIFT = 1.9;
+
+// Apparent body size across a window, as a ratio of high to low shoulder
+// width. A steady swing sits near 1.
+function scaleDrift(pts, w) {
+  const scales = pts
+    .filter((f) => f.timeMs >= w.start_ms && f.timeMs <= w.end_ms)
+    .map(frameScale)
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b);
+  if (scales.length < 5) return 1;   // too little to judge; assume steady
+  // Percentiles, not min and max: one bad detection should not condemn a
+  // window, and real instability shows up across many frames, not one.
+  const lo = scales[Math.floor(scales.length * 0.1)];
+  const hi = scales[Math.floor(scales.length * 0.9)];
+  return lo > 0 ? +(hi / lo).toFixed(2) : 1;
+}
+
+// The clip's typical body size, used as a stable ruler.
+function medianScale(pts) {
+  const v = pts.map(frameScale).filter((x) => x > 0).sort((a, b) => a - b);
+  return v.length ? v[v.length >> 1] : 0;
+}
+
+// Shoulder separation: the body's own ruler, used to make speeds and
+// distances independent of how far away the golfer stands.
+function frameScale(frame) {
+  const l = frame?.landmarks?.[11], r = frame?.landmarks?.[12];
+  if (!l || !r) return 0;
+  return Math.hypot(l.x - r.x, l.y - r.y);
 }
 
 function bodyPoint(frame) {
@@ -111,15 +164,48 @@ function bodyPoint(frame) {
 // Separated from extraction so the whole deterministic layer — quality,
 // capability, phases, measurements, observations — is testable without a
 // browser, a camera or a model.
+// A downsampled skeleton for the overlay.
+//
+// The full landmark series is large — roughly 2 MB as JSON for a dense
+// window — and the index is a ~5-10 MB localStorage budget shared with the
+// whole app. It is also recomputable. So only the points the app actually
+// draws are kept: the thirteen landmarks §8.1 names, every third frame,
+// rounded to three decimals. That is a few kilobytes and enough for a
+// legible overlay.
+const OVERLAY_STRIDE = 3;
+const OVERLAY_POINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+export function buildPoseFrames(series) {
+  const out = [];
+  for (let i = 0; i < series.length; i += OVERLAY_STRIDE) {
+    const f = series[i];
+    if (!f?.landmarks) continue;
+    const points = [];
+    for (const idx of OVERLAY_POINTS) {
+      const p = f.landmarks[idx];
+      if (!p || (p.visibility ?? 0) < 0.5) continue;
+      points.push({ x: +p.x.toFixed(3), y: +p.y.toFixed(3) });
+    }
+    if (points.length) out.push({ t: Math.round(f.timeMs), points });
+  }
+  return out;
+}
+
 export function buildEvidence(series, { cameraView = 'unknown', fps = null, durationMs = null, window = null } = {}) {
   const quality = assessQuality(series, { fps, cameraView, durationMs });
   if (!quality.analysable) {
     return { quality, phases: [], measurements: [], observations: [], signals: null };
   }
+  // How steadily the body was tracked across this window. Spatial claims
+  // are only as trustworthy as the body ruler they are measured against.
+  const trackingDrift = window?.scale_drift ?? 1;
+  quality.tracking_drift = trackingDrift;
+  quality.tracking_steady = trackingDrift <= MAX_SCALE_DRIFT;
+
   const { phases, signals } = detectPhases(series, { cameraView });
-  const measurements = measureSwing(series, phases, quality, { cameraView });
+  const measurements = measureSwing(series, phases, quality, { cameraView, trackingDrift });
   const observations = buildObservations(measurements, phases, quality);
-  return { quality, phases, measurements, observations, signals, window };
+  return { quality, phases, measurements, observations, signals, window, poseFrames: buildPoseFrames(series) };
 }
 
 // The public entry point.
@@ -203,6 +289,7 @@ export async function analyzeSwing(swingVideoId, { onStage, signal, candidateInd
         measurements: evidence.measurements,
         observations: evidence.observations,
         signals: evidence.signals,
+        pose_frames: evidence.poseFrames,
         shot_id: video.shot_id ?? null,
         range_session_id: video.range_session_id ?? null,
         active_focus_snapshot: video.active_focus_snapshot ?? null,

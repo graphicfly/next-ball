@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { resetDB } from './setup.js';
 import { LM, CONFIDENCE, CAPABILITY, assessQuality, effectiveFps, groupVisibility, roundForConfidence } from '../js/swingEvidence.js';
 import { detectPhases } from '../js/swingPhases.js';
-import { measureSwing, buildObservations } from '../js/swingMeasure.js';
+import { measureSwing, buildObservations, topObservation } from '../js/swingMeasure.js';
 import { buildEvidence, findCandidates } from '../js/swingAnalysis.js';
 
 // The deterministic evidence layer.
@@ -514,4 +514,126 @@ describe('No AI, no coaching, no cloud in this phase', () => {
       assert.ok(!/ideal|benchmark|tour average|pro average/i.test(src.replace(/\/\/.*/g, '')), `${f} must not benchmark`);
     }
   });
+});
+
+describe('Measurements span the swing, not the window around it', () => {
+  // The dense window carries runway so address and finish sit inside it,
+  // which means it also carries the golfer walking into and out of shot.
+  // Measuring across all of that produced a head travel of 3.1 shoulder
+  // widths on real footage — the golfer entering frame, not moving.
+  function withApproach(swing) {
+    const lead = [];
+    for (let i = 0; i < 20; i++) {
+      const t = -((20 - i) / 30) * 1000;
+      const lm = swing[0].landmarks.map((l) => ({ ...l }));
+      // Walking in from the left. Slow — a golfer walks far more slowly
+      // than they swing, and a fixture that does otherwise tests the
+      // detector against something that never happens.
+      const drift = (20 - i) * 0.008;
+      for (const p of lm) p.x = Math.max(0, p.x - drift);
+      lead.push({ timeMs: t, landmarks: lm });
+    }
+    return [...lead, ...swing].map((f, i) => ({ ...f, timeMs: (i / 30) * 1000 }));
+  }
+
+  test('an approach walk does not inflate head movement', () => {
+    const swing = makeSwing({ fps: 30 });
+    const padded = withApproach(swing);
+    const q = assessQuality(padded, { fps: 30, cameraView: 'face_on' });
+    const { phases } = detectPhases(padded);
+    const ms = measureSwing(padded, phases, q, { cameraView: 'face_on' });
+    const lateral = ms.find((m) => m.key === 'head_lateral');
+
+    // A head cannot travel more than about one shoulder width in a swing.
+    assert.ok(lateral.value != null, 'still measured');
+    assert.ok(lateral.value < 1.0, `head travel should be plausible, got ${lateral.value}`);
+  });
+
+  test('measurements fall back to the whole window when phases are missing', () => {
+    const s = makeSwing({ fps: 30 });
+    const q = assessQuality(s, { fps: 30, cameraView: 'face_on' });
+    // No phases at all — the engine must still produce something rather
+    // than dividing by an empty span.
+    const ms = measureSwing(s, [], q, { cameraView: 'face_on' });
+    assert.ok(ms.length > 0);
+    assert.ok(ms.some((m) => !m.withheld));
+  });
+});
+
+describe('Pose jumps are filtered, not measured', () => {
+  // MediaPipe tracks one person. On range footage it can latch onto a
+  // golfer in a neighbouring bay, or lose the subject and snap back. Those
+  // frames are not the golfer moving, and on real footage they produced a
+  // head travel of 2.9 shoulder widths — an impossible number wearing the
+  // clothes of a measurement.
+  function withPoseJumps(swing, count = 8) {
+    return swing.map((f, i) => {
+      if (i % 7 !== 0 || count-- <= 0 || !f.landmarks) return f;
+      const lm = f.landmarks.map((l) => ({ ...l }));
+      // A different, much smaller body somewhere else in frame.
+      lm[LM.leftShoulder] = { ...lm[LM.leftShoulder], x: 0.05, y: 0.30 };
+      lm[LM.rightShoulder] = { ...lm[LM.rightShoulder], x: 0.11, y: 0.30 };
+      lm[LM.nose] = { ...lm[LM.nose], x: 0.08, y: 0.10 };
+      return { ...f, landmarks: lm };
+    });
+  }
+
+  test('a jumping pose does not produce an impossible head travel', () => {
+    const s = withPoseJumps(makeSwing({ fps: 30 }));
+    const q = assessQuality(s, { fps: 30, cameraView: 'face_on' });
+    const { phases } = detectPhases(s);
+    const m = measureSwing(s, phases, q, { cameraView: 'face_on' }).find((x) => x.key === 'head_lateral');
+    if (!m.withheld) {
+      assert.ok(m.value < 1.0, `head travel must stay plausible, got ${m.value}`);
+    }
+  });
+
+  test('badly unstable tracking withholds spatial measurements entirely', () => {
+    // Over 40% of frames showing a different body is not a measurement
+    // problem to soften — it is a measurement that should not be made.
+    const s = withPoseJumps(makeSwing({ fps: 30 }), 999).map((f, i) =>
+      (i % 2 === 0 && f.landmarks ? {
+        ...f,
+        landmarks: f.landmarks.map((l, j) => (j === LM.leftShoulder ? { ...l, x: 0.02 } : j === LM.rightShoulder ? { ...l, x: 0.06 } : l)),
+      } : f));
+    const q = assessQuality(s, { fps: 30, cameraView: 'face_on' });
+    const { phases } = detectPhases(s);
+    const ms = measureSwing(s, phases, q, { cameraView: 'face_on' });
+    const spatial = ms.filter((m) => m.unit === 'shoulder_widths');
+    assert.ok(spatial.every((m) => m.withheld), 'spatial claims are withheld when tracking is unstable');
+  });
+});
+
+describe('Unsteady tracking is reported, not quietly measured', () => {
+  test('withholds every measurement and explains why', () => {
+    const s = makeSwing({ fps: 30 });
+    const q = assessQuality(s, { fps: 30, cameraView: 'face_on' });
+    // Real footage of a golfer too far from the camera measured 1.98.
+    q.tracking_steady = false;
+    const { phases } = detectPhases(s);
+    const ms = measureSwing(s, phases, q, { cameraView: 'face_on', trackingDrift: 1.98 });
+    assert.ok(ms.every((m) => m.withheld), 'nothing is claimed from a body that was not tracked');
+
+    const obs = buildObservations(ms, phases, q);
+    assert.ok(obs.length, 'an empty result still explains itself');
+    assert.match(obs[0].text, /could not be tracked steadily/);
+    // The golfer is still on the range; the note has to be actionable.
+    assert.match(obs[0].text, /camera|frame|film/i);
+  });
+
+  test('steady tracking is not penalised', () => {
+    const s = makeSwing({ fps: 240 });
+    const q = assessQuality(s, { fps: 240, cameraView: 'face_on' });
+    const { phases } = detectPhases(s);
+    const ms = measureSwing(s, phases, q, { cameraView: 'face_on', trackingDrift: 1.05 });
+    assert.ok(ms.some((m) => !m.withheld), 'good footage still measures');
+    assert.ok(!buildObservations(ms, phases, q).some((o) => /could not be tracked/.test(o.text)));
+  });
+});
+
+test('the result leads with the tracking problem, not with silence', () => {
+  const q = { tracking_steady: false, visibility: { wrists: 0.9 } };
+  const top = topObservation([], [], q);
+  assert.match(top.text, /could not be tracked steadily/);
+  assert.equal(top.kind, 'limitation');
 });

@@ -1,4 +1,4 @@
-import { LM, VISIBLE, CONFIDENCE, CAPABILITY, supportLevel, roundForConfidence } from './swingEvidence.js';
+import { LM, VISIBLE, CONFIDENCE, CAPABILITY, supportLevel, roundForConfidence, lowerOf } from './swingEvidence.js';
 
 // The measurement engine (swing-lab-spec.md §8.2).
 //
@@ -17,6 +17,10 @@ import { LM, VISIBLE, CONFIDENCE, CAPABILITY, supportLevel, roundForConfidence }
 // The approved matrix, as data. 'reliable' | 'approximate' | 'camera' |
 // 'unsupported', straight from §8.2 including the corrections the spike
 // forced on hand-derived measurements in Down-the-Line.
+// Mirrors MAX_SCALE_DRIFT in swingAnalysis.js, kept here so this module
+// stays independent of where the swing was located.
+export const TRACKING_DRIFT_LIMIT = 1.9;
+
 const MATRIX = {
   head_lateral:      { face_on: 'reliable',    down_the_line: 'approximate' },
   head_vertical:     { face_on: 'reliable',    down_the_line: 'reliable' },
@@ -81,20 +85,75 @@ function rangeOf(frames, pick) {
 
 // Everything §8.2 approves, computed where the view, landmarks and timing
 // allow, and explicitly withheld where they do not.
-export function measureSwing(series, phases, quality, { cameraView = 'unknown' } = {}) {
+export function measureSwing(series, phases, quality, { cameraView = 'unknown', trackingDrift = 1 } = {}) {
   const view = cameraView;
-  const frames = (series || []).filter((f) => Array.isArray(f.landmarks));
   const out = [];
+  if (!Array.isArray(series) || !series.length) return out;
+
+  // Measure the SWING, not the window around it.
+  //
+  // The dense window deliberately carries runway either side so address and
+  // finish are inside it — which means it also carries the golfer walking
+  // in, setting up, and stepping away. Measuring across all of that
+  // produced a head travel of 3.1 shoulder widths on real footage, which is
+  // physically impossible and was the golfer entering frame, not moving
+  // their head.
+  //
+  // So the span is address to finish where both were detected, and the
+  // whole window only as a fallback.
+  const byPhase = Object.fromEntries((phases || []).map((p) => [p.phase, p]));
+  const startIdx = byPhase.address?.frame_index ?? 0;
+  const endIdx = byPhase.finish?.frame_index ?? series.length - 1;
+  const span = (endIdx > startIdx + 2) ? series.slice(startIdx, endIdx + 1) : series;
+
+  const allFrames = span.filter((f) => Array.isArray(f.landmarks));
+  if (!allFrames.length) return out;
+
+  // Drop frames where the pose has jumped.
+  //
+  // MediaPipe tracks one person; on range footage it can latch onto a
+  // different golfer in a neighbouring bay, or lose the subject and snap
+  // back. Those frames are not the golfer moving, and including them
+  // produced a head travel of 2.9 shoulder widths on real footage — an
+  // impossible number that looks like a measurement.
+  //
+  // The tell is body SCALE: a golfer's shoulder width cannot change much
+  // between adjacent frames, so a frame whose width departs sharply from
+  // the clip's median is a different body or a broken detection.
+  const median = shoulderWidth(allFrames);
+  const frames = median
+    ? allFrames.filter((f) => {
+      const l = pt(f, LM.leftShoulder), r = pt(f, LM.rightShoulder);
+      if (!l || !r) return false;
+      const w = Math.hypot(l.x - r.x, l.y - r.y);
+      return w > median * 0.6 && w < median * 1.6;
+    })
+    : allFrames;
   if (!frames.length) return out;
 
+  // How much of the window survived. A heavily filtered window means the
+  // tracking was unstable, and everything built on it says so.
+  const stability = allFrames.length ? frames.length / allFrames.length : 0;
   const scale = shoulderWidth(frames);
-  const byName = Object.fromEntries((phases || []).map((p) => [p.phase, p]));
   const at = (name) => {
-    const p = byName[name];
+    const p = byPhase[name];
     return p && p.frame_index != null ? series[p.frame_index] : null;
   };
-  const supportFor = (key, needs, requiresFull = false) =>
-    supportLevel({ view, needs, requiresFull, quality, matrix: MATRIX[key] });
+  // Every spatial measurement is expressed in shoulder widths, so it is
+  // only as sound as the tracked body. Two things can undermine it: the
+  // body's apparent size drifting across the window (TRACKING_DRIFT_LIMIT,
+  // measured when the swing was located), and frames within the window
+  // showing a body of the wrong size at all. On real range footage where
+  // the golfer was too far from the camera, both were true and the result
+  // was a head that travelled three shoulder widths. A number like that is
+  // not a soft measurement to be hedged; it is not a measurement.
+  const steady = trackingDrift <= TRACKING_DRIFT_LIMIT;
+  const supportFor = (key, needs, requiresFull = false) => {
+    const level = supportLevel({ view, needs, requiresFull, quality, matrix: MATRIX[key] });
+    if (!steady || stability < 0.6) return CONFIDENCE.UNSUPPORTED;
+    if (stability < 0.85) return lowerOf(level, CONFIDENCE.LOW);
+    return level;
+  };
 
   // ---- Posture / head ----
   // Body-relative, never inches (§3.2).
@@ -256,6 +315,18 @@ export function buildObservations(measurements, phases, quality) {
   const byKey = Object.fromEntries((measurements || []).map((m) => [m.key, m]));
   const usable = (k) => byKey[k] && !byKey[k].withheld && byKey[k].confidence !== CONFIDENCE.LOW;
 
+  // Said first, and said plainly, because it explains an otherwise empty
+  // result and it is the one thing the golfer can act on while still
+  // standing on the range: move the camera, not the swing.
+  if (quality && quality.tracking_steady === false) {
+    out.push({
+      text: 'Your body could not be tracked steadily through this clip, so no positions were measured. '
+        + 'This usually means the camera was too far away, the framing cut part of you off, or someone '
+        + 'else moved through the shot. Film again from about 8 feet with your whole body in frame.',
+      cites: ['tracking_drift'],
+    });
+  }
+
   if (usable('swing_duration')) {
     out.push({
       text: `The analysed swing lasted ${(byKey.swing_duration.value / 1000).toFixed(2)} seconds.`,
@@ -282,4 +353,118 @@ export function buildObservations(measurements, phases, quality) {
     });
   }
   return out;
+}
+
+// The single most notable thing the evidence supports (§26, "STOOD OUT").
+//
+// Ranked, deterministic, and never prescriptive. It describes what was
+// measured and, where the footage limited the measurement, says so — which
+// is itself the most useful thing to lead with when it is true.
+//
+// Everything here is a statement about THIS recording. Nothing compares the
+// golfer to an ideal, and nothing infers mechanics from the shot result.
+export function topObservation(measurements, phases, quality) {
+  const by = Object.fromEntries((measurements || []).map((m) => [m.key, m]));
+  const ok = (k) => by[k] && !by[k].withheld && by[k].value != null;
+  const impact = (phases || []).find((p) => p.phase === 'impact');
+
+  // 0. If the body was never tracked steadily, nothing below it is true.
+  //    This has to lead, because the alternative is a screen that looks
+  //    merely empty when it is actually telling the golfer to move the
+  //    camera.
+  if (quality?.tracking_steady === false) {
+    return {
+      text: 'Your body could not be tracked steadily in this clip, so nothing was measured. '
+        + 'Film again from about 8 feet with your whole body in frame.',
+      cites: ['tracking_drift'],
+      kind: 'limitation',
+    };
+  }
+
+  // 1. A tempo ratio is the most trustworthy number the system produces,
+  //    so when the frames exist to support it, it leads.
+  if (ok('tempo_ratio')) {
+    return {
+      text: `This swing had a ${by.tempo_ratio.value.toFixed(1)}:1 backswing-to-downswing tempo.`,
+      cites: ['tempo_ratio'],
+      kind: 'measurement',
+    };
+  }
+
+  // 2. A limitation the golfer should know about beats a weaker number.
+  if (quality?.visibility?.wrists != null && quality.visibility.wrists < 0.5) {
+    return {
+      text: `Your lower body tracked more reliably than your hands in this recording — hands were visible in ${Math.round(quality.visibility.wrists * 100)}% of frames.`,
+      cites: ['visibility.wrists', 'visibility.hips'],
+      kind: 'limitation',
+    };
+  }
+  if (impact && impact.exactness === 'approximate' && quality?.capability === 'standard') {
+    return {
+      text: `Impact timing and fast hand movement are limited at ${Math.round(quality.effectiveFps || 30)} fps.`,
+      cites: ['impact', 'capability'],
+      kind: 'limitation',
+    };
+  }
+
+  // 3. Head stability, stated as the measurement it is — a fraction of
+  //    shoulder width — never as an instruction about keeping it still.
+  if (ok('head_lateral') && ok('head_vertical')) {
+    const worst = Math.max(by.head_lateral.value, by.head_vertical.value);
+    const steady = worst < 0.25;
+    return {
+      text: steady
+        ? 'Your head position stayed relatively stable through the swing.'
+        : `Your head moved about ${worst.toFixed(2)} of a shoulder width through the swing.`,
+      cites: ['head_lateral', 'head_vertical'],
+      kind: 'measurement',
+    };
+  }
+
+  if (ok('swing_duration')) {
+    return {
+      text: `The analysed swing lasted ${(by.swing_duration.value / 1000).toFixed(2)} seconds.`,
+      cites: ['swing_duration'],
+      kind: 'measurement',
+    };
+  }
+  return null;
+}
+
+// Measurements grouped for display, with unsupported ones dropped entirely
+// rather than rendered as empty cards.
+export const MEASUREMENT_GROUPS = [
+  { title: 'Head / Posture', keys: ['head_lateral', 'head_vertical', 'head_depth', 'posture_change'] },
+  { title: 'Rotation', keys: ['shoulder_rotation', 'hip_rotation'] },
+  { title: 'Lower Body', keys: ['hip_sway', 'hip_depth', 'knee_flex'] },
+  { title: 'Arms / Hands', keys: ['hand_path_range', 'elbow_spacing'] },
+];
+
+export const MEASUREMENT_LABELS = {
+  head_lateral: 'Side-to-side head movement',
+  head_vertical: 'Up-and-down head movement',
+  head_depth: 'Head toward / away from ball',
+  posture_change: 'Posture change',
+  shoulder_rotation: 'Shoulder turn (proxy)',
+  hip_rotation: 'Hip turn (proxy)',
+  hip_sway: 'Hip sway',
+  hip_depth: 'Hip depth',
+  knee_flex: 'Knee movement',
+  hand_path_range: 'Hand path range',
+  elbow_spacing: 'Elbow separation',
+  swing_duration: 'Total swing',
+  backswing_ms: 'Backswing',
+  downswing_ms: 'Downswing',
+  tempo_ratio: 'Ratio',
+};
+
+// Body-relative units read as a fraction of shoulder width, which is the
+// honest description — never converted to inches (§12).
+export function formatMeasurement(m) {
+  if (!m || m.withheld || m.value == null) return null;
+  if (m.unit === 'ms') return `${Math.round(m.value)} ms`;
+  if (m.unit === 'ratio') return `${m.value.toFixed(1)}:1`;
+  if (m.unit === 'shoulder_widths') return `${m.value.toFixed(2)} × shoulder width`;
+  if (m.unit === 'relative_change') return `${m.value.toFixed(2)} (relative)`;
+  return String(m.value);
 }

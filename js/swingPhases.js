@@ -115,18 +115,26 @@ export function detectPhases(series, { cameraView = 'unknown' } = {}) {
   const vmax = peak.v;
   const peakIndex = speed.findIndex((s) => s === peak);
 
-  // Address: the last settled frame before motion begins. "Settled" is
-  // relative to the swing's own peak, so it adapts to how hard this golfer
-  // swings rather than to an absolute number.
-  const quiet = vmax * 0.08;
-  let motionStart = speed.findIndex((s) => s && s.v > quiet);
-  if (motionStart < 0) motionStart = 0;
-  const addressIdx = Math.max(0, motionStart - 1);
+  // Top FIRST, then address backwards from it.
+  //
+  // Searching forward from the start of the window for "the first motion"
+  // finds the golfer walking into frame, setting up, or waggling — all of
+  // which are motion. On real footage that put address 40 frames before the
+  // swing and made head travel read as 3.1 shoulder widths, which was the
+  // golfer arriving, not moving their head.
+  //
+  // The top is unambiguous (a direction reversal at the highest point), so
+  // it anchors everything: address is the last settled frame in the second
+  // or so before it, which is the address position by definition.
+  const topIdx = findReversal(primary, 0, peakIndex);
 
-  // Top: the direction reversal. With hands this is the hand-path reversal;
-  // without them it is the shoulder-line reversal, which is the same event
-  // observed through a landmark that does not disappear.
-  const topIdx = findReversal(primary, addressIdx, peakIndex);
+  const quiet = vmax * 0.08;
+  const ADDRESS_LOOKBACK_MS = 1600;
+  const addressIdx = findAddress(speed, series, topIdx, quiet, ADDRESS_LOOKBACK_MS);
+  let motionStart = addressIdx != null
+    ? nextMovingAfter(speed, addressIdx, quiet)
+    : speed.findIndex((s) => s && s.v > quiet);
+  if (motionStart < 0) motionStart = addressIdx ?? 0;
 
   // Impact: maximum speed inside the downswing. At Standard capability this
   // is a window rather than a frame (§7.1), which the exactness records.
@@ -184,6 +192,39 @@ export function detectPhases(series, { cameraView = 'unknown' } = {}) {
       fell_back_to_body: !handsUsable,
     },
   };
+}
+
+// The last settled frame within a bounded lookback before the top. Bounded
+// so that a walk-up, a practice swing or a long wait cannot become address.
+function findAddress(speed, series, topIdx, quiet, lookbackMs) {
+  if (topIdx == null) return null;
+  const topTime = series[topIdx]?.timeMs ?? 0;
+  let best = null;
+  for (let i = topIdx - 1; i >= 0; i--) {
+    const t = series[i]?.timeMs;
+    if (t == null) continue;
+    if (topTime - t > lookbackMs) break;
+    const s = speed[i];
+    // Settled, or not yet moving at all.
+    if (!s || s.v <= quiet) { best = i; break; }
+  }
+  // Nothing settled inside the lookback: fall back to its far edge rather
+  // than reaching back to the start of the clip.
+  if (best == null) {
+    for (let i = topIdx - 1; i >= 0; i--) {
+      const t = series[i]?.timeMs;
+      if (t != null && topTime - t > lookbackMs) return i + 1;
+    }
+    return 0;
+  }
+  return best;
+}
+
+function nextMovingAfter(speed, fromIdx, quiet) {
+  for (let i = fromIdx + 1; i < speed.length; i++) {
+    if (speed[i] && speed[i].v > quiet) return i;
+  }
+  return -1;
 }
 
 // Vertical direction reversal — the hands (or shoulders) stop rising and
