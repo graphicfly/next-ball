@@ -220,6 +220,8 @@ export function renderSwingResult(root, swingVideoId) {
           <div class="swing-metric"><span>Frames analyzed</span><b>${quality.framesWithPose ?? '—'}</b></div>
           <div class="swing-metric"><span>Hands visible</span><b>${quality.visibility?.wrists != null ? `${Math.round(quality.visibility.wrists * 100)}%` : '—'}</b></div>
           <div class="swing-metric"><span>Lower body visible</span><b>${quality.visibility?.hips != null ? `${Math.round(quality.visibility.hips * 100)}%` : '—'}</b></div>
+          ${quality.tracking_drift != null ? `<div class="swing-metric"><span>Body tracking</span><b>${quality.tracking_steady === false ? 'unsteady' : 'steady'} &middot; ${quality.tracking_drift}&times;</b>
+            ${quality.tracking_steady === false ? '<em class="swing-metric-conf">no positions measured</em>' : ''}</div>` : ''}
           ${standard ? '<p class="tiny muted">Impact timing and fast hand movement are limited at this frame rate. Record in slow motion for a fuller reading.</p>' : ''}
           <div class="swing-metric"><span>Engine</span><b>v${analysis.analysis_version} &middot; ${escapeHtml(analysis.pose_model_version || '')}</b></div>
           ${analysis.timing ? `<div class="swing-metric"><span>Analysis time</span><b>${(analysis.timing.totalMs / 1000).toFixed(1)}s</b></div>
