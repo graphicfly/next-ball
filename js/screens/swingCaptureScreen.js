@@ -244,6 +244,9 @@ export function renderSwingCapture(root) {
       range_session_id: live.session_id,
       club: live.current_club || live.default_club || null,
       camera_view: view,
+      // What the camera negotiated, not what the file claims. Diagnostic
+      // only: capability is decided by measured frame timestamps.
+      capture_settings: result.settings ?? null,
       // A COPY of everything true at the moment of recording. Session
       // defaults change during a session; this must not (§10).
       practice_context: buildRecordingContext(live),

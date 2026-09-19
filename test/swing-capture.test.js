@@ -272,3 +272,43 @@ describe('The motion trigger threshold', () => {
     assert.ok(MOTION_TUNING.consecutive >= 2);
   });
 });
+
+describe('What the camera negotiated is recorded', () => {
+  // The track reports a nominal frame rate, the container stores an average,
+  // and analysis uses neither — capability comes from measured frame
+  // timestamps. This field exists so that when those disagree, the
+  // disagreement is visible instead of lost with the MediaStream.
+  const SETTINGS = { width: 1920, height: 1080, frameRate: 60 };
+
+  test('capture settings reach the record', async () => {
+    const db = await resetDB();
+    const v = db.createSwingVideo({ media_ref: 'm', capture_settings: SETTINGS });
+    assert.deepEqual(v.capture_settings, SETTINGS);
+  });
+
+  test('they survive a reload', async () => {
+    const db = await resetDB();
+    const v = db.createSwingVideo({ media_ref: 'm', capture_settings: SETTINGS });
+    db.__resetForTests();
+    // The bug this guards against is silent: a field accepted on the way in
+    // and dropped on the way out reads as "the camera told us nothing".
+    assert.deepEqual(db.getSwingVideo(v.swing_video_id).capture_settings, SETTINGS);
+  });
+
+  test('an imported file has none, and none is invented', async () => {
+    const db = await resetDB();
+    const v = db.createSwingVideo({ media_ref: 'm' });
+    assert.equal(v.capture_settings, null, 'a file that was never captured has nothing to report');
+  });
+
+  test('older records normalise to null rather than undefined', async () => {
+    const db = await resetDB();
+    const v = db.createSwingVideo({ media_ref: 'm' });
+    // Simulate a record written before this field existed.
+    const raw = JSON.parse(localStorage.getItem('rangelog_index_v1'));
+    delete raw.swing_videos[0].capture_settings;
+    localStorage.setItem('rangelog_index_v1', JSON.stringify(raw));
+    db.__resetForTests();
+    assert.equal(db.getSwingVideo(v.swing_video_id).capture_settings, null);
+  });
+});

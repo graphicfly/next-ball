@@ -33,6 +33,22 @@ const FAIL_COPY = {
   analysis_failed: "That swing couldn't be analyzed.",
 };
 
+// Why there is no tempo, answered honestly.
+//
+// Frame rate is the usual reason but not the only one, and blaming it at 60
+// fps — which the panel directly above reports as sufficient — tells the
+// golfer something false about their own recording.
+function tempoAbsenceReason(quality) {
+  if (quality?.tracking_steady === false) {
+    return 'Tempo needs your body tracked steadily through the swing. It was not, so nothing was timed.';
+  }
+  const fps = quality?.effectiveFps;
+  if (fps != null && fps >= 59) {
+    return 'Tempo could not be timed from this recording, though the frame rate was high enough for it.';
+  }
+  return `Tempo needs 60 fps or higher. At ${Math.round(fps || 30)} fps too few frames span the fastest part of the swing to time it honestly.`;
+}
+
 // ---------- runner ----------
 
 export function renderSwingAnalyze(root, swingVideoId) {
@@ -130,6 +146,9 @@ export function renderSwingResult(root, swingVideoId) {
   const view = VIEW_LABEL[analysis.camera_view] || 'Swing';
   const quality = analysis.video_quality || {};
   const standard = analysis.capability !== 'full';
+  // What the camera promised, shown beside what the frames measured. When
+  // they disagree, that difference is the diagnostic.
+  const cs = analysis.source?.capture_settings || null;
   const top = topObservation(analysis.measurements, analysis.detected_phases, quality);
   const phases = Object.fromEntries((analysis.detected_phases || []).map((p) => [p.phase, p]));
 
@@ -200,7 +219,7 @@ export function renderSwingResult(root, swingVideoId) {
             ${tempo.map((m) => `<div class="swing-metric"><span>${escapeHtml(MEASUREMENT_LABELS[m.key] || m.key)}</span><b>${escapeHtml(formatMeasurement(m))}</b></div>`).join('')}
           </details>`
         : `<details class="swing-details"><summary>Tempo</summary>
-            <p class="tiny muted">Tempo needs 60 fps or higher. At ${Math.round(quality.effectiveFps || 30)} fps too few frames span the fastest part of the swing to time it honestly.</p>
+            <p class="tiny muted">${escapeHtml(tempoAbsenceReason(quality))}</p>
           </details>`}
 
         ${groups.length ? `
@@ -224,6 +243,7 @@ export function renderSwingResult(root, swingVideoId) {
           ${quality.tracking_drift != null ? `<div class="swing-metric"><span>Body tracking</span><b>${quality.tracking_steady === false ? 'unsteady' : 'steady'} &middot; ${quality.tracking_drift}&times;</b>
             ${quality.tracking_steady === false ? '<em class="swing-metric-conf">no positions measured</em>' : ''}</div>` : ''}
           ${standard ? '<p class="tiny muted">Impact timing and fast hand movement are limited at this frame rate. Record in slow motion for a fuller reading.</p>' : ''}
+          ${cs ? `<div class="swing-metric"><span>Camera gave</span><b>${cs.width && cs.height ? `${cs.width}&times;${cs.height}` : '—'}${cs.frameRate ? ` &middot; ${Math.round(cs.frameRate)} fps` : ''}</b></div>` : ''}
           <div class="swing-metric"><span>Engine</span><b>v${analysis.analysis_version} &middot; ${escapeHtml(analysis.pose_model_version || '')}</b></div>
           ${analysis.timing ? `<div class="swing-metric"><span>Analysis time</span><b>${(analysis.timing.totalMs / 1000).toFixed(1)}s</b></div>
           <div class="swing-metric"><span>Coarse / dense</span><b>${analysis.timing.coarseMs}ms / ${analysis.timing.denseMs}ms</b></div>

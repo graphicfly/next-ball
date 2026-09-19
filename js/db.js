@@ -291,6 +291,7 @@ function normalizeIndexShape(idx) {
     // with a shot is linked; one without never had a shot coming.
     if (!v.association_state) v.association_state = v.shot_id ? 'linked' : 'unpaired';
     if (v.shot_id === undefined) v.shot_id = null;
+    if (v.capture_settings === undefined) v.capture_settings = null;
   }
   if (!idx.settings || typeof idx.settings !== 'object') idx.settings = {};
   if (idx.settings.active_swing_focus === undefined) idx.settings.active_swing_focus = null;
@@ -1638,6 +1639,15 @@ export function createSwingVideo(fields = {}) {
     display_height: fields.display_height ?? null,
     rotation_deg: fields.rotation_deg ?? null,
     fps: fields.fps ?? null,
+    // What the CAMERA said it would deliver, kept apart from what the file
+    // turned out to contain and from what the frames were later measured
+    // at. All three can disagree: the track reports a nominal frame rate,
+    // the container stores an average, and the only number anything is
+    // computed from is the one measured off real frame timestamps. This one
+    // is diagnostic — it answers "what did Safari actually negotiate?",
+    // which is otherwise unknowable after the fact. Null for an imported
+    // file, which had no capture session.
+    capture_settings: fields.capture_settings ?? null,
     // iPhone records variable frame rate, so an average fps can be a number
     // that lies. Recording the fact protects anything computed from timing.
     variable_frame_rate: fields.variable_frame_rate ?? null,

@@ -303,7 +303,7 @@ async function runAnalysis(swingVideoId, { onStage, signal, candidateIndex = 0 }
         pose_model_version: pose.MODEL_VERSION,
         swing_window: chosen,
         camera_view: video.camera_view,
-        source: { fps: video.fps, variable_frame_rate: video.variable_frame_rate, duration_ms: video.duration_ms, rotation_deg: video.rotation_deg, display_width: video.display_width, display_height: video.display_height },
+        source: { fps: video.fps, variable_frame_rate: video.variable_frame_rate, duration_ms: video.duration_ms, rotation_deg: video.rotation_deg, display_width: video.display_width, display_height: video.display_height, capture_settings: video.capture_settings ?? null },
         video_quality: evidence.quality,
         capability: evidence.quality.capability,
         detected_phases: evidence.phases,
