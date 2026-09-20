@@ -4047,3 +4047,125 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   opacity: 0.85;
 }
 .capture-flip:active { opacity: 1; }
+
+/* ---------- Practice: Chipping and Putting ---------- */
+/* Reuses the existing tokens, rows, chips and hero button. Nothing here
+   introduces a new visual language — practice-spec.md §25. */
+
+.practice-focus {
+  display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  margin: 0 var(--gutter, 1rem) 0.9rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface-2, rgba(255,255,255,0.04));
+  border-radius: 12px;
+}
+.practice-focus-label {
+  font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase;
+  opacity: 0.55;
+}
+.practice-focus-text { font-size: 0.95rem; }
+
+.setup-block { margin: 0 var(--gutter, 1rem) 1.25rem; }
+.setup-label {
+  font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase;
+  opacity: 0.6; margin-bottom: 0.5rem;
+}
+.setup-note { margin: -0.6rem var(--gutter, 1rem) 1.2rem; }
+
+.drill-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.drill-option {
+  display: flex; flex-direction: column; gap: 0.2rem; text-align: left;
+  padding: 0.85rem 0.95rem; border-radius: 12px;
+  background: var(--surface-2, rgba(255,255,255,0.04));
+  border: 1px solid transparent; color: inherit;
+}
+.drill-option.selected {
+  border-color: var(--accent, #7CFF6B);
+  background: var(--accent-dim, rgba(124,255,107,0.10));
+}
+.drill-option-name { font-size: 1rem; font-weight: 600; }
+.drill-option-blurb { font-size: 0.82rem; opacity: 0.65; }
+
+/* Logging. Large targets, one question at a time. */
+.practice-log { padding-bottom: 2rem; }
+.practice-context-line {
+  margin: 0 var(--gutter, 1rem) 0.4rem;
+  font-size: 0.8rem; letter-spacing: 0.04em; opacity: 0.6;
+}
+.practice-tally {
+  margin: 0 var(--gutter, 1rem) 1.1rem;
+  font-size: 0.9rem; opacity: 0.85;
+}
+.practice-move { margin: 0 var(--gutter, 1rem) 0.8rem; opacity: 0.7; }
+.practice-question {
+  margin: 0 var(--gutter, 1rem) 0.7rem;
+  font-size: 1.05rem; font-weight: 600;
+}
+.practice-options {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  margin: 0 var(--gutter, 1rem) 0.9rem;
+}
+.practice-options.small { flex-direction: row; flex-wrap: wrap; }
+.practice-options.big .practice-option { min-height: 4.2rem; font-size: 1.2rem; }
+.practice-option {
+  min-height: 3.2rem; padding: 0.7rem 1rem; border-radius: 12px;
+  background: var(--surface-2, rgba(255,255,255,0.05));
+  border: 1px solid transparent; color: inherit;
+  font-size: 1.02rem; text-align: center;
+}
+.practice-option.good { border-color: var(--accent, #7CFF6B); }
+.practice-option.selected {
+  background: var(--accent-dim, rgba(124,255,107,0.14));
+  border-color: var(--accent, #7CFF6B);
+}
+.practice-option.small { min-height: 2.6rem; flex: 1 1 5rem; font-size: 0.92rem; }
+.practice-option.wide { width: calc(100% - 2 * var(--gutter, 1rem)); margin: 0 var(--gutter, 1rem) 0.6rem; }
+.practice-skip {
+  display: block; margin: 0 auto 0.9rem; padding: 0.5rem 0.9rem;
+  background: none; border: none; color: inherit; opacity: 0.6;
+  font-size: 0.88rem; text-decoration: underline;
+}
+.practice-logged {
+  margin: 0 var(--gutter, 1rem) 0.8rem;
+  font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent, #7CFF6B);
+}
+.practice-optional { margin: 0 var(--gutter, 1rem) 1rem; }
+.practice-optional-label { font-size: 0.85rem; opacity: 0.7; margin-bottom: 0.45rem; }
+.practice-optional .practice-options { margin-left: 0; margin-right: 0; }
+
+/* The distance-control matrix: proximity and pace in one tap (§16). */
+.matrix { margin: 0 var(--gutter, 1rem) 1rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.matrix-row { display: grid; grid-template-columns: 5.5rem 1fr 1fr; gap: 0.45rem; align-items: stretch; }
+.matrix-label { display: flex; align-items: center; font-size: 0.85rem; opacity: 0.75; }
+.matrix-cell { min-height: 3rem; }
+
+/* Summary: one dominant result (§22). */
+.practice-summary-head { margin: 0 var(--gutter, 1rem) 1.4rem; }
+.practice-summary-title { font-size: 1.3rem; font-weight: 700; }
+.practice-summary-sub { font-size: 0.85rem; opacity: 0.6; margin-top: 0.2rem; }
+.practice-headline { margin: 0 var(--gutter, 1rem) 1.6rem; }
+.practice-headline-value { font-size: 3.2rem; font-weight: 700; line-height: 1; }
+.practice-headline-label { font-size: 0.98rem; opacity: 0.75; margin-top: 0.3rem; }
+.practice-pattern {
+  margin: 0 var(--gutter, 1rem) 1.4rem; padding: 0.85rem 0.95rem;
+  background: var(--surface-2, rgba(255,255,255,0.04)); border-radius: 12px;
+}
+.practice-pattern-label { font-size: 0.66rem; letter-spacing: 0.12em; opacity: 0.55; }
+.practice-pattern-text { font-size: 1rem; margin: 0.25rem 0 0.35rem; }
+.practice-stats { display: flex; gap: 1.6rem; margin: 0 var(--gutter, 1rem) 1.6rem; flex-wrap: wrap; }
+.practice-stat-value { font-size: 1.5rem; font-weight: 700; }
+.practice-stat-label { font-size: 0.8rem; opacity: 0.65; }
+.practice-again { display: block; margin: 0.6rem auto 1.5rem; }
+
+.progress-group-label {
+  margin: 1.4rem var(--gutter, 1rem) 0.5rem;
+  font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase;
+  opacity: 0.45;
+}
+.progress-group-label:first-child { margin-top: 0.4rem; }
+
+.practice-card-eyebrow {
+  font-size: 0.63rem; letter-spacing: 0.12em; text-transform: uppercase;
+  opacity: 0.5; margin: 0.1rem 0 0.5rem;
+}
