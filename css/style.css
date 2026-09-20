@@ -4192,3 +4192,149 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   color: var(--color-text-secondary);
 }
 .progress-group-label:first-child { margin-top: var(--space-2); }
+
+/* ---------- Active practice: the one-tap canvases ---------- */
+/* Outdoors, standing, possibly gloved, with about a second of attention.
+   Every primary target is a large filled region, never a text link. */
+
+.practice-screen .practice-body {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+  padding-bottom: var(--space-4);
+}
+.practice-head { text-align: center; padding: var(--space-2) 0 var(--space-3); }
+.practice-count {
+  font-size: 40px; font-weight: var(--weight-bold); line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.practice-count-sep, .practice-count-target { color: var(--color-text-secondary); font-weight: var(--weight-medium); }
+.practice-streak {
+  font-size: var(--text-label); letter-spacing: 0.08em; margin-top: var(--space-2);
+  color: var(--color-accent);
+}
+.practice-head-context {
+  font-size: var(--text-label); color: var(--color-text-secondary);
+  margin-top: var(--space-2); letter-spacing: 0.03em;
+}
+
+.practice-canvas {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+}
+
+/* Concentric proximity target. */
+.prox-target { width: 100%; max-width: 380px; height: auto; touch-action: manipulation; }
+.prox-zone {
+  fill: var(--color-surface);
+  stroke: var(--color-divider); stroke-width: 1.5;
+  cursor: pointer;
+}
+.prox-zone:nth-of-type(odd) { fill: var(--color-surface-2); }
+.prox-zone[data-bucket="holed"] { fill: var(--color-surface-2); stroke: var(--color-accent); stroke-width: 2; }
+.prox-zone.hit { fill: var(--color-accent); stroke: var(--color-accent); }
+.prox-label {
+  fill: var(--color-text-secondary); font-size: 15px; font-weight: 600;
+  pointer-events: auto; cursor: pointer; user-select: none;
+}
+.prox-label.is-holed { fill: var(--color-accent); font-size: 13px; letter-spacing: 0.08em; }
+.prox-ball { fill: #fff; }
+
+/* Short-putt grid: the largest targets a phone can offer. */
+.putt-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2);
+  width: 100%; max-width: 380px; aspect-ratio: 1 / 1;
+}
+.putt-spacer { }
+.putt-cell {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-surface); border: 1.5px solid var(--color-divider);
+  border-radius: var(--radius-md); color: inherit;
+  font-size: var(--text-body); font-weight: var(--weight-semibold);
+  cursor: pointer; touch-action: manipulation; min-height: 76px;
+}
+.putt-cell.is-made {
+  border-color: var(--color-accent); background: var(--color-surface-2);
+  font-size: var(--text-body-lg); border-radius: 50%;
+}
+.putt-cell.hit { background: var(--color-accent); color: var(--color-accent-contrast); border-color: var(--color-accent); }
+
+/* Distance-control target: past above the hole, short below it. */
+.lag-target {
+  display: flex; flex-direction: column; gap: 6px;
+  width: 100%; max-width: 380px;
+}
+.lag-side-label {
+  text-align: center; font-size: var(--text-section); letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--color-text-secondary);
+}
+.lag-cell, .lag-holed {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 52px; border-radius: var(--radius-md);
+  background: var(--color-surface); border: 1.5px solid var(--color-divider);
+  color: inherit; font-size: var(--text-body); cursor: pointer;
+  touch-action: manipulation;
+}
+.lag-holed {
+  border-color: var(--color-accent); background: var(--color-surface-2);
+  font-weight: var(--weight-semibold); min-height: 58px;
+}
+.lag-cell.hit, .lag-holed.hit { background: var(--color-accent); color: var(--color-accent-contrast); border-color: var(--color-accent); }
+
+/* Two outsized choices. */
+.binary-target { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; max-width: 380px; }
+.binary-cell {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 96px; border-radius: var(--radius-lg);
+  background: var(--color-surface); border: 1.5px solid var(--color-divider);
+  color: inherit; font-size: var(--text-body-lg); font-weight: var(--weight-semibold);
+  cursor: pointer; touch-action: manipulation;
+}
+.binary-cell.is-good { border-color: var(--color-accent); }
+.binary-cell.hit { background: var(--color-accent); color: var(--color-accent-contrast); border-color: var(--color-accent); }
+.binary-cell.compact { min-height: 64px; font-size: var(--text-body); }
+.putts-step-label {
+  text-align: center; font-size: var(--text-body); color: var(--color-text-secondary);
+  margin-bottom: var(--space-2);
+}
+.putts-step-row { display: flex; gap: var(--space-3); }
+.putts-step-row .binary-cell { flex: 1; }
+.dist-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); }
+
+/* Armed controls: compact to look at, still 44px to hit. */
+.practice-controls { padding: var(--space-3) 0 0; }
+.practice-control-row {
+  display: flex; gap: var(--space-2); justify-content: center; flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.practice-control-row.optional { opacity: 0.9; }
+.mini-toggle {
+  min-height: 44px; min-width: 62px; padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-surface); border: 1.5px solid var(--color-divider);
+  color: var(--color-text-secondary); font-size: var(--text-label);
+  cursor: pointer; touch-action: manipulation;
+}
+.mini-toggle.active {
+  background: var(--color-accent); color: var(--color-accent-contrast);
+  border-color: var(--color-accent); font-weight: var(--weight-semibold);
+}
+
+.practice-flash {
+  min-height: 22px; text-align: center; font-size: var(--text-label);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--color-text-secondary); opacity: 0;
+  transition: opacity 120ms ease;
+}
+.practice-flash.show { opacity: 1; }
+.practice-flash.good { color: var(--color-accent); }
+
+.practice-footer {
+  display: flex; gap: var(--space-3); justify-content: center;
+  padding-top: var(--space-3);
+}
+.practice-secondary {
+  min-height: 44px; padding: 0 var(--space-4);
+  background: none; border: 1.5px solid var(--color-divider);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary); font-size: var(--text-label);
+  cursor: pointer; touch-action: manipulation;
+}
+.practice-secondary:disabled { opacity: 0.35; }

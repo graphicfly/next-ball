@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nextball-v93';
+const CACHE_NAME = 'nextball-v94';
 // NOTE: vendor/maplibre is deliberately NOT precached (§14.5). At 1.01 MB it
 // is larger than the entire rest of the app, for a screen half of all
 // courses cannot show — precaching it would roughly double a fresh install.
@@ -83,6 +83,8 @@ const PRECACHE_URLS = [
   './js/screens/puttingSetup.js',
   './js/screens/puttingSession.js',
   './js/screens/practiceSummaryScreen.js',
+  './js/screens/practiceCanvas.js',
+  './js/screens/practiceEdit.js',
   './js/screens/swingResult.js',
   './js/screens/trends.js',
   './js/screens/settings.js',
