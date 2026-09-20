@@ -4,6 +4,8 @@ import { sessionSummary, clubSummaryLabel } from '../stats.js';
 import { roundTotals, formatToPar } from '../roundAnalysis.js';
 import { downloadSessionCSV } from '../export.js';
 import { takePendingLessonUndo, openLessonDeleteConfirmSheet } from './lessonSummary.js';
+import { chippingSummary, puttingSummary } from '../practiceSummary.js';
+import { chippingDrill, puttingDrill, LIE_LABELS, PUTT_SURFACE_LABELS } from '../practice.js';
 
 const ICON_DOTS = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
 
@@ -135,9 +137,46 @@ function lessonCardHtml(lesson, activeFocus) {
 // Module-scope so the choice survives the re-render a delete triggers, and
 // deliberately NOT persisted: a filter is a momentary act of looking for
 // something, and a golfer returning tomorrow expects to see everything.
+// Practice modes join the existing chip row rather than getting a second
+// archive (practice-spec.md §R). The order groups practice together, then
+// play, then lessons — which is the grouping the golfer already thinks in.
+// A chipping or putting session card. Shares the session-card language, and
+// shows the one figure its summary leads with — never a fabricated average
+// and never a pattern, which needs the coverage line the summary screen has
+// room for (practice-spec.md §7, §10).
+function practiceCardHtml(session) {
+  const putting = session.mode === 'putting';
+  const reps = putting ? db.listPutts(session.session_id) : db.listChips(session.session_id);
+  const sum = putting ? puttingSummary(session, reps) : chippingSummary(session, reps);
+  const drill = putting ? puttingDrill(session.practice_type) : chippingDrill(session.practice_type);
+  const isFinished = session.status === 'finished';
+  const badge = !isFinished ? statusBadgeHtml(cap(session.status), 'warning') : '';
+  const s = session.setup || {};
+  const context = putting
+    ? [s.distance_ft != null ? `${s.distance_ft} ft` : 'Mixed', s.surface ? PUTT_SURFACE_LABELS[s.surface] : null].filter(Boolean).join(' · ')
+    : [s.club, s.distance_yds != null ? `${s.distance_yds} yd` : null, s.lie ? LIE_LABELS[s.lie] : null].filter(Boolean).join(' · ');
+
+  return `
+    <div class="session-card practice-card" data-practice-id="${session.session_id}">
+      <div class="row1">
+        <div class="date">${fmtDate(session.date)} ${badge}</div>
+        <div class="row1-right">
+          <div class="balls">${reps.length} ${putting ? 'putt' : 'chip'}${reps.length === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+      <div class="practice-card-eyebrow">${escapeHtml(putting ? 'PUTTING' : 'CHIPPING')} &middot; ${escapeHtml(drill.name)}</div>
+      ${sum.headline ? metricRowHtml([
+        { value: sum.headline.value, label: sum.headline.label },
+      ], 'md') : ''}
+      ${context ? `<div class="foot-line"><span>${escapeHtml(context)}</span><span></span></div>` : ''}
+    </div>`;
+}
+
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'session', label: 'Range' },
+  { id: 'chipping', label: 'Chipping' },
+  { id: 'putting', label: 'Putting' },
   { id: 'round', label: 'Rounds' },
   { id: 'lesson', label: 'Lessons' },
 ];
@@ -165,6 +204,10 @@ export function renderHistory(root) {
     ...db.listSessions().map((s) => ({ kind: 'session', on: s.date || '', at: s.created_at || '', record: s })),
     ...db.listRounds().map((r) => ({ kind: 'round', on: r.date || '', at: r.created_at || '', record: r })),
     ...db.listLessons().map((l) => ({ kind: 'lesson', on: l.date || '', at: l.created_at || '', record: l })),
+    // Chipping and putting sessions are their own kinds rather than a
+    // single "practice" bucket: the golfer filtering for putting does not
+    // want chipping, and the card contents differ entirely.
+    ...db.listPracticeSessions().map((p) => ({ kind: p.mode, on: p.date || '', at: p.created_at || '', record: p })),
     // Ordered by the day the activity happened, then by when it was
     // recorded. Sessions and rounds are always created on their own date,
     // so their order is unchanged — but a lesson typed up a week later
@@ -195,6 +238,7 @@ export function renderHistory(root) {
     ? entries.map((e) => {
       if (e.kind === 'session') return sessionCardHtml(e.record);
       if (e.kind === 'round') return roundCardHtml(e.record);
+      if (e.kind === 'chipping' || e.kind === 'putting') return practiceCardHtml(e.record);
       return lessonCardHtml(e.record, activeFocus);
     }).join('')
     : all.length
@@ -254,10 +298,14 @@ export function renderHistory(root) {
     });
   });
 
-  // Round and lesson cards share .session-card for its shell styling, so
-  // both must be excluded here or they would pick up the session handler
-  // too and navigate to a session id they do not have.
-  qsa('.session-card:not(.round-card):not(.lesson-card)', root).forEach((card) => {
+  qsa('.practice-card', root).forEach((card) => {
+    card.addEventListener('click', () => { location.hash = `#/practice/summary/${card.dataset.practiceId}`; });
+  });
+
+  // Round, lesson and practice cards share .session-card for its shell
+  // styling, so all three must be excluded here or they would pick up the
+  // session handler too and navigate to a session id they do not have.
+  qsa('.session-card:not(.round-card):not(.lesson-card):not(.practice-card)', root).forEach((card) => {
     card.addEventListener('click', () => {
       const id = card.dataset.id;
       const status = card.dataset.status;
