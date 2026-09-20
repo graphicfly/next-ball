@@ -1,20 +1,20 @@
 import * as db from '../db.js';
 import { qs, qsa, escapeHtml, toast } from '../ui.js';
-import {
-  LEAVE_BUCKETS, LEAVE_LABELS, PACE, PACE_LABELS,
-  MISS_LATERAL, MISS_DEPTH, MISS_LABELS, PUTT_SURFACE_LABELS,
-  puttModelFor, puttingDrill, pct,
-} from '../practice.js';
+import { PUTT_SURFACE_LABELS, puttModelFor, puttingDrill, pct } from '../practice.js';
+import { puttTargetHtml, lagTargetHtml, binaryTargetHtml, progressHeadHtml } from './practiceCanvas.js';
+import { openRepEditor } from './practiceEdit.js';
 
-// Putting — logging.
+// Putting — one screen, one tap.
 //
-// Two result models and deliberately no third (practice-spec.md §14.1):
+// A made putt is the common case and costs exactly one tap on the middle of
+// the target. A directional miss costs one tap too, because the direction IS
+// the target: tapping Left both records the miss and says which way it went.
+// The old flow asked Made/Missed, then direction, then Next putt.
 //
-//   <= 10 ft   Made / Missed, one tap, optional direction on a miss
-//   >  10 ft   the one-tap matrix, capturing proximity AND pace together
-//
-// Mixed practice chooses between them per putt by the same threshold, which
-// is why the threshold lives in practice.js rather than here.
+// Distance control keeps its matrix, which was already one tap, and loses
+// the review state that followed it.
+
+const FEEDBACK_MS = 220;
 
 export function renderPuttingSession(root, sessionId) {
   const session = db.getPracticeSession(sessionId);
@@ -23,175 +23,165 @@ export function renderPuttingSession(root, sessionId) {
   const isStreak = drill.result_model === 'streak';
   const mixed = session.kind === 'mixed';
 
-  // Mixed sessions ask for the distance of the ball in hand; everything else
-  // takes it from the session.
   let currentDistance = session.setup?.distance_ft ?? null;
-  let lastPutt = null;
-  let showingMiss = false;
+  let busy = false;
 
-  function streakState() {
-    // Derived from the records, never stored — a streak that disagreed with
-    // the putts behind it would be a second source of truth.
+  function streak() {
     const putts = db.listPutts(sessionId);
     let run = 0;
-    for (let i = putts.length - 1; i >= 0; i--) {
-      if (putts[i].result === 'made') run += 1; else break;
-    }
-    return { run, target: session.setup?.streak_target || 3, total: putts.length };
+    for (let i = putts.length - 1; i >= 0; i--) { if (putts[i].result === 'made') run += 1; else break; }
+    return { run, target: session.setup?.streak_target || 3 };
   }
 
-  function headline() {
-    const putts = db.listPutts(sessionId);
-    if (!putts.length) return '';
-    if (isStreak) {
-      const { run, target } = streakState();
-      const dots = Array.from({ length: target }, (_, i) => (i < run ? '●' : '○')).join(' ');
-      return `${run} in a row · ${dots}`;
+  function contextLine() {
+    const s = session.setup || {};
+    return [
+      mixed ? (currentDistance != null ? `${currentDistance} ft` : 'Mixed') : (currentDistance != null ? `${currentDistance} ft` : null),
+      s.surface ? PUTT_SURFACE_LABELS[s.surface] : null,
+    ].filter(Boolean).join(' · ');
+  }
+
+  function streakLine() {
+    if (!isStreak) return null;
+    const { run, target } = streak();
+    const dots = Array.from({ length: target }, (_, i) => (i < run ? '●' : '○')).join(' ');
+    return `${run} in a row   ${dots}`;
+  }
+
+  function targetHtml() {
+    if (mixed && currentDistance == null) {
+      return `
+        <div class="binary-target putts-step">
+          <div class="putts-step-label">How far is this one?</div>
+          <div class="dist-grid">
+            ${[3, 5, 8, 10, 15, 20, 30, 40].map((d) => `<button class="binary-cell compact" data-dist="${d}"><span>${d} ft</span></button>`).join('')}
+          </div>
+        </div>`;
     }
-    const made = putts.filter((p) => p.result === 'made').length;
-    if (session.kind === 'distance') {
-      const close = putts.filter((p) => p.result === 'made' || p.leave_bucket === 'in_3').length;
-      return `${putts.length} putt${putts.length === 1 ? '' : 's'} · ${pct(close, putts.length)}% inside 3 ft`;
-    }
-    return `${made} / ${putts.length} made`;
+    if (isStreak) return binaryTargetHtml({ value: 'made', label: 'Made' }, { value: 'missed', label: 'Missed' });
+    return puttModelFor(currentDistance) === 'short' ? puttTargetHtml() : lagTargetHtml();
   }
 
   function draw() {
     const putts = db.listPutts(sessionId);
-    const s = session.setup || {};
-    const context = [
-      mixed ? 'Mixed' : (currentDistance != null ? `${currentDistance} ft` : null),
-      s.surface ? PUTT_SURFACE_LABELS[s.surface] : null,
-    ].filter(Boolean).join(' · ');
-
     root.innerHTML = `
-      <div class="screen">
+      <div class="screen practice-screen">
         <div class="topbar">
           <button class="back" id="endBtn">Finish</button>
           <span class="screen-title">${escapeHtml(drill.name)}</span>
-          <button class="back" id="undoBtn" ${putts.length ? '' : 'disabled'}>Undo</button>
+          <span class="side-space"></span>
         </div>
-        <div class="scroll practice-log">
-          <div class="practice-context-line">${escapeHtml(context)}</div>
-          ${session.focus_snapshot ? `<div class="practice-focus"><span class="practice-focus-label">Focus</span><span class="practice-focus-text">${escapeHtml(session.focus_snapshot.cue_text)}</span></div>` : ''}
-          <div class="practice-tally">${escapeHtml(headline())}</div>
-          <div id="stepArea"></div>
+        <div class="practice-body">
+          ${progressHeadHtml({ done: putts.length, target: session.target_ball_count, context: contextLine(), streak: streakLine() })}
+          <div class="practice-canvas" id="canvas">${targetHtml()}</div>
+          <div class="practice-flash" id="flash" aria-live="polite"></div>
+          <div class="practice-footer">
+            <button class="practice-secondary" id="undoBtn" ${putts.length ? '' : 'disabled'}>Undo</button>
+            <button class="practice-secondary" id="editBtn" ${putts.length ? '' : 'disabled'}>Edit previous</button>
+          </div>
         </div>
       </div>`;
+    wire();
+  }
 
+  function refreshCount() {
+    const el = qs('.practice-count-done', root);
+    if (el) el.textContent = String(db.listPutts(sessionId).length);
+    qs('#undoBtn', root)?.removeAttribute('disabled');
+    qs('#editBtn', root)?.removeAttribute('disabled');
+    const s = qs('.practice-streak', root);
+    if (s && isStreak) s.textContent = streakLine();
+  }
+
+  function flash(text, tone = '') {
+    const el = qs('#flash', root);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `practice-flash show ${tone}`;
+    setTimeout(() => { if (el.isConnected) el.className = 'practice-flash'; }, 900);
+  }
+
+  function pulse(el) {
+    if (!el) return;
+    el.classList.add('hit');
+    setTimeout(() => el.classList.remove('hit'), FEEDBACK_MS);
+  }
+
+  function commit(fields, el, label, tone) {
+    const putt = db.addPutt(sessionId, { distance_ft: currentDistance, ...fields });
+    if (!putt) { toast("Couldn't save that putt"); busy = false; return null; }
+    pulse(el);
+    // Mixed practice takes a new distance every ball, so the canvas has to
+    // change; everything else restores in place.
+    if (mixed) { currentDistance = null; draw(); } else { refreshCount(); }
+    flash(label, tone);
+    // Held for the feedback window. Releasing synchronously guards nothing —
+    // rapid taps in one tick each run to completion and write a putt each.
+    setTimeout(() => { busy = false; }, FEEDBACK_MS);
+    return putt;
+  }
+
+  function wire() {
     qs('#endBtn', root).addEventListener('click', finish);
+
     qs('#undoBtn', root).addEventListener('click', () => {
       if (!db.deleteLastPutt(sessionId)) return;
-      toast('Putt removed');
-      lastPutt = null; showingMiss = false;
       draw();
+      flash('Removed');
     });
 
-    drawStep();
-  }
-
-  function drawStep() {
-    const area = qs('#stepArea', root);
-
-    // Mixed practice needs to know the distance before it knows which
-    // result model applies.
-    if (mixed && currentDistance == null) {
-      area.innerHTML = `
-        <div class="practice-question">How far is this one?</div>
-        <div class="practice-options">
-          ${[3, 5, 8, 10, 15, 20, 30, 40].map((d) => `<button class="practice-option" data-d="${d}">${d} ft</button>`).join('')}
-        </div>`;
-      qsa('.practice-option', area).forEach((b) => b.addEventListener('click', () => {
-        currentDistance = Number(b.dataset.d);
-        draw();
-      }));
-      return;
-    }
-
-    if (showingMiss) { drawMissRow(); return; }
-
-    const model = puttModelFor(currentDistance);
-
-    if (model === 'short' || isStreak) {
-      area.innerHTML = `
-        <div class="practice-options big">
-          <button class="practice-option good" data-r="made">Made</button>
-          <button class="practice-option" data-r="missed">Missed</button>
-        </div>`;
-      qsa('.practice-option', area).forEach((b) => b.addEventListener('click', () => {
-        const result = b.dataset.r;
-        lastPutt = db.addPutt(sessionId, { result, distance_ft: currentDistance });
-        if (isStreak && result === 'missed') toast('Streak reset');
-        // A made putt is one tap and done (§15).
-        if (result === 'made') { afterPutt(); return; }
-        showingMiss = true;
-        draw();
-      }));
-      return;
-    }
-
-    // §16: one tap on the matrix captures proximity AND pace together. This
-    // must not be split into two mandatory questions — which is also why
-    // distance-control patterns always have full coverage while short-putt
-    // direction patterns have to be gated.
-    area.innerHTML = `
-      <div class="practice-question">Where did it finish?</div>
-      <button class="practice-option good wide" data-holed="1">Holed</button>
-      <div class="matrix">
-        ${LEAVE_BUCKETS.map((b) => `
-          <div class="matrix-row">
-            <div class="matrix-label">${escapeHtml(LEAVE_LABELS[b])}</div>
-            ${PACE.map((p) => `<button class="practice-option matrix-cell" data-b="${b}" data-p="${p}">${escapeHtml(PACE_LABELS[p])}</button>`).join('')}
-          </div>`).join('')}
-      </div>`;
-
-    qs('.practice-option[data-holed]', area).addEventListener('click', () => {
-      // A holed lag is a made putt with no leave fields (§17).
-      lastPutt = db.addPutt(sessionId, { result: 'made', distance_ft: currentDistance });
-      afterPutt();
+    qs('#editBtn', root).addEventListener('click', () => {
+      const putts = db.listPutts(sessionId);
+      const last = putts[putts.length - 1];
+      if (!last) return;
+      openRepEditor(root, { kind: 'putt', sessionId, record: last, onDone: () => draw() });
     });
-    qsa('.matrix-cell', area).forEach((b) => b.addEventListener('click', () => {
-      lastPutt = db.addPutt(sessionId, {
-        result: 'missed', distance_ft: currentDistance,
-        leave_bucket: b.dataset.b, leave_dir: b.dataset.p,
+
+    qsa('[data-dist]', root).forEach((b) => b.addEventListener('click', () => {
+      currentDistance = Number(b.dataset.dist);
+      draw();
+    }));
+
+    // Short putting: Made in the middle, each miss direction its own cell.
+    // One tap either way.
+    qsa('.putt-cell', root).forEach((cell) => {
+      cell.addEventListener('click', () => {
+        if (busy) return;
+        busy = true;
+        if (cell.dataset.result === 'made') {
+          commit({ result: 'made' }, cell, 'Made', 'good');
+          return;
+        }
+        const axis = cell.dataset.axis;
+        commit({ result: 'missed', [axis]: cell.dataset.value }, cell, `Missed ${cell.dataset.value}`);
       });
-      afterPutt();
-    }));
-  }
+    });
 
-  function drawMissRow() {
-    const area = qs('#stepArea', root);
-    // §9: short-putt miss order is Left · Right · Short · Long, because
-    // start line is what matters at short range. Deliberately NOT the
-    // chipping order, and not to be normalised for consistency.
-    area.innerHTML = `
-      <div class="practice-logged">Missed</div>
-      <div class="practice-optional">
-        <div class="practice-optional-label">Which way? <span class="tiny muted">optional</span></div>
-        <div class="practice-options small">
-          ${MISS_LATERAL.map((d) => `<button class="practice-option small" data-axis="miss_lateral" data-v="${d}">${MISS_LABELS[d]}</button>`).join('')}
-          ${MISS_DEPTH.map((d) => `<button class="practice-option small" data-axis="miss_depth" data-v="${d}">${MISS_LABELS[d]}</button>`).join('')}
-        </div>
-      </div>
-      <button class="btn btn-primary btn-hero" id="nextBtn">Next putt</button>`;
+    // Distance control: proximity and pace together, already one tap.
+    qsa('.lag-cell', root).forEach((cell) => {
+      cell.addEventListener('click', () => {
+        if (busy) return;
+        busy = true;
+        commit({ result: 'missed', leave_bucket: cell.dataset.bucket, leave_dir: cell.dataset.dir },
+          cell, `${cell.dataset.dir === 'short' ? 'Short' : 'Past'}`);
+      });
+    });
+    qs('.lag-holed', root)?.addEventListener('click', (e) => {
+      if (busy) return;
+      busy = true;
+      // A holed lag is a make with no leave fields (practice-spec.md §17).
+      commit({ result: 'made' }, e.currentTarget, 'Holed', 'good');
+    });
 
-    qsa('.practice-option[data-axis]', area).forEach((b) => b.addEventListener('click', () => {
-      if (!lastPutt) return;
-      const axis = b.dataset.axis;
-      const value = lastPutt[axis] === b.dataset.v ? null : b.dataset.v;
-      db.updatePutt(sessionId, lastPutt.putt_id, { [axis]: value });
-      lastPutt[axis] = value;
-      qsa(`.practice-option[data-axis="${axis}"]`, area).forEach((x) => x.classList.toggle('selected', x.dataset.v === value));
-    }));
-
-    qs('#nextBtn', area).addEventListener('click', () => { afterPutt(); });
-  }
-
-  function afterPutt() {
-    showingMiss = false;
-    lastPutt = null;
-    if (mixed) currentDistance = null;   // a new distance each time (§14)
-    draw();
+    // Pressure Finish.
+    qsa('[data-choice]', root).forEach((b) => {
+      b.addEventListener('click', () => {
+        if (busy) return;
+        busy = true;
+        const made = b.dataset.choice === 'made';
+        commit({ result: made ? 'made' : 'missed' }, b, made ? 'Made' : 'Streak reset', made ? 'good' : '');
+      });
+    });
   }
 
   function finish() {
