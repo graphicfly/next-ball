@@ -303,6 +303,7 @@ function normalizeIndexShape(idx) {
     if (!p.status) p.status = p.ended_at ? 'finished' : 'active';
     if (p.focus_snapshot === undefined) p.focus_snapshot = null;
     if (p.goal_snapshot === undefined) p.goal_snapshot = null;
+    if (p.target_ball_count == null) p.target_ball_count = DEFAULT_BALL_COUNT;
   }
   for (const v of idx.swing_videos) {
     if (!v.camera_view) v.camera_view = 'unknown';
@@ -3015,6 +3016,9 @@ export function createPracticeSession(fields = {}) {
     ended_at: null,
     status: 'active',
     setup: { ...(fields.setup || {}) },
+    // How many balls the golfer planned. The live screen reads "7 / 50",
+    // where 7 is balls COMPLETED — never the ball about to be hit.
+    target_ball_count: fields.target_ball_count ?? DEFAULT_BALL_COUNT,
     focus_snapshot: fields.focus_snapshot ?? null,
     goal_snapshot: fields.goal_snapshot ?? null,
     data_source: fields.data_source || 'user',

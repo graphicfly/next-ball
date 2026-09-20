@@ -50,6 +50,7 @@ export function renderPuttingSetup(root, drillId) {
   const state = {
     distance_ft: drill.default_distance_ft || saved.distance_ft || distances[1],
     surface: saved.surface || 'green',
+    target_ball_count: saved.target_ball_count || 20,
   };
 
   function draw() {
@@ -72,6 +73,14 @@ export function renderPuttingSetup(root, drillId) {
                 <button type="button" class="pill" data-name="distance_ft" data-value="custom">Custom</button>
               </div>
             </div>` : ''}
+          <div class="setup-block">
+            <div class="setup-label">Balls</div>
+            <div class="pill-select" role="radiogroup" aria-label="Balls">
+              ${[10, 20, 30, 50].map((n) => `
+                <button type="button" class="pill ${n === state.target_ball_count ? 'active' : ''}" role="radio"
+                        aria-checked="${n === state.target_ball_count}" data-name="target_ball_count" data-value="${n}">${n}</button>`).join('')}
+            </div>
+          </div>
           <div class="setup-block">
             <div class="setup-label">Surface</div>
             <div class="pill-select" role="radiogroup" aria-label="Surface">
@@ -100,7 +109,7 @@ export function renderPuttingSetup(root, drillId) {
           if (!Number.isFinite(n) || n <= 0) return;
           state.distance_ft = Math.round(n);
         } else {
-          state[name] = name === 'distance_ft' ? Number(value) : value;
+          state[name] = (name === 'distance_ft' || name === 'target_ball_count') ? Number(value) : value;
         }
         draw();
       });
@@ -111,6 +120,7 @@ export function renderPuttingSetup(root, drillId) {
         mode: MODES.PUTTING,
         kind: drill.kind,
         practice_type: drill.id,
+        target_ball_count: state.target_ball_count,
         setup: {
           distance_ft: needsDistance ? state.distance_ft : null,
           surface: state.surface,
@@ -119,7 +129,7 @@ export function renderPuttingSetup(root, drillId) {
         focus_snapshot: db.swingFocusSnapshot(),
       });
       if (!session) { toast("Couldn't start that session"); return; }
-      db.updateSettings({ [DEFAULTS_KEY]: { distance_ft: state.distance_ft, surface: state.surface } });
+      db.updateSettings({ [DEFAULTS_KEY]: { distance_ft: state.distance_ft, surface: state.surface, target_ball_count: state.target_ball_count } });
       location.hash = `#/putting/${session.session_id}`;
     });
   }

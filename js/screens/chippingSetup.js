@@ -43,6 +43,7 @@ export function renderChippingSetup(root) {
     lie: saved.lie || 'fairway',
     surface: saved.surface || 'grass',
     distance_yds: saved.distance_yds || 10,
+    target_ball_count: saved.target_ball_count || 30,
     practice_type: 'standard',
   };
 
@@ -61,6 +62,7 @@ export function renderChippingSetup(root) {
           ${pillRow('Distance to hole', 'distance_yds',
             CHIP_DISTANCES.map((d) => ({ value: d, label: `${d} yd` })).concat([{ value: 'custom', label: 'Custom' }]),
             state.distance_yds)}
+          ${pillRow('Balls', 'target_ball_count', [10, 20, 30, 50].map((n) => ({ value: n, label: String(n) })), state.target_ball_count)}
           <p class="tiny muted setup-note">Distance is your estimate of the shot you are practicing, not a measurement.</p>
 
           <div class="setup-block">
@@ -98,7 +100,7 @@ export function renderChippingSetup(root) {
           if (!Number.isFinite(n) || n <= 0) return;
           state.distance_yds = Math.round(n);
         } else {
-          state[name] = name === 'distance_yds' ? Number(value) : value;
+          state[name] = (name === 'distance_yds' || name === 'target_ball_count') ? Number(value) : value;
         }
         draw();
       });
@@ -126,13 +128,14 @@ export function renderChippingSetup(root) {
       const session = db.createPracticeSession({
         mode: MODES.CHIPPING,
         practice_type: state.practice_type,
+        target_ball_count: state.target_ball_count,
         setup,
         // Snapshotted now, so a later edit to the Focus cannot rewrite what
         // this session was practised under (§19).
         focus_snapshot: db.swingFocusSnapshot(),
       });
       if (!session) { toast("Couldn't start that session"); return; }
-      db.updateSettings({ [DEFAULTS_KEY]: { club: state.club, lie: state.lie, surface: state.surface, distance_yds: state.distance_yds } });
+      db.updateSettings({ [DEFAULTS_KEY]: { club: state.club, lie: state.lie, surface: state.surface, distance_yds: state.distance_yds, target_ball_count: state.target_ball_count } });
       location.hash = `#/chipping/${session.session_id}`;
     });
   }
