@@ -24,6 +24,12 @@ import { renderSwingCapture } from './screens/swingCaptureScreen.js';
 import { renderSwingPreview } from './screens/swingPreview.js';
 import { renderSwingLab } from './screens/swingLab.js';
 import { renderSwingAnalyze, renderSwingResult } from './screens/swingResult.js';
+import { renderPractice } from './screens/practice.js';
+import { renderChippingSetup } from './screens/chippingSetup.js';
+import { renderChippingSession } from './screens/chippingSession.js';
+import { renderPuttingSelect, renderPuttingSetup } from './screens/puttingSetup.js';
+import { renderPuttingSession } from './screens/puttingSession.js';
+import { renderPracticeSummary } from './screens/practiceSummaryScreen.js';
 import { renderSettings } from './screens/settings.js';
 import { getActiveSession, getActiveRound, getSettings } from './db.js';
 import { enableWakeLock } from './wakeLock.js';
@@ -79,6 +85,16 @@ const routes = [
   { pattern: /^#\/swing\/analyze\/([^/]+)$/, render: (m) => renderSwingAnalyze(root, m[1]) },
   { pattern: /^#\/swing\/result\/([^/]+)$/, render: (m) => renderSwingResult(root, m[1]) },
   { pattern: /^#\/swing-lab$/, render: () => renderSwingLab(root) },
+  // Practice (docs/practice-spec.md). Single-task screens, so none of these
+  // is a nav route — global navigation stays Home | Progress | History |
+  // Settings, the same reasoning that kept Course Mode and Lessons out.
+  { pattern: /^#\/practice$/, render: () => renderPractice(root) },
+  { pattern: /^#\/chipping\/setup$/, render: () => renderChippingSetup(root) },
+  { pattern: /^#\/chipping\/([^/]+)$/, render: (m) => renderChippingSession(root, m[1]) },
+  { pattern: /^#\/putting\/select$/, render: () => renderPuttingSelect(root) },
+  { pattern: /^#\/putting\/setup\/([^/]+)$/, render: (m) => renderPuttingSetup(root, m[1]) },
+  { pattern: /^#\/putting\/([^/]+)$/, render: (m) => renderPuttingSession(root, m[1]) },
+  { pattern: /^#\/practice\/summary\/([^/]+)$/, render: (m) => renderPracticeSummary(root, m[1]) },
   { pattern: /^#\/trends$/, render: () => renderTrends(root) },
   { pattern: /^#\/settings$/, render: () => renderSettings(root) },
 ];

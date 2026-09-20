@@ -158,10 +158,19 @@ const shotsKeyFor = (sessionId) => `rangelog_shots_v1_${sessionId}`;
 // below): round metadata in the index, each round's played holes in their
 // own chunk.
 const holesKeyFor = (roundId) => `rangelog_holes_v1_${roundId}`;
+// Practice (practice-spec.md §5, §17) reuses the identical split a third and
+// fourth time: session metadata in the index, each session's own reps in
+// their own chunk. Chipping and putting are kept in SEPARATE keys rather
+// than one "reps" key, because a chip and a putt are different records and
+// merging them would mean every reader filtering by shape.
+const chipsKeyFor = (sessionId) => `rangelog_chips_v1_${sessionId}`;
+const puttsKeyFor = (sessionId) => `rangelog_putts_v1_${sessionId}`;
 
 let _index = null; // { schemaVersion, sessions: [...], rounds: [...], courses: [...], settings: {} }
 const _shotsCache = new Map(); // session_id -> shots array, lazily loaded from its own key
 const _holesCache = new Map(); // round_id -> holes array, same lazy-load pattern as _shotsCache
+const _chipsCache = new Map(); // practice session_id -> chips array
+const _puttsCache = new Map(); // practice session_id -> putts array
 
 function nowISO() {
   return new Date().toISOString();
@@ -228,6 +237,11 @@ function defaultIndex() {
     swing_videos: [],
     // Derived from swing_videos and disposable — see createSwingAnalysis.
     swing_analyses: [],
+    // Chipping and Putting practice (practice-spec.md §5, §17). Metadata
+    // only; the chips and putts live in their own chunks. Range sessions
+    // keep their existing `sessions` array untouched — practice modes are
+    // ADDITIVE, and nothing existing is migrated into this.
+    practice_sessions: [],
     // active_swing_focus is a POINTER at a lesson's cue, not a copy of it —
     // see setActiveSwingFocus. Null when no focus is set, which is the
     // state every install starts in and the state a golfer can return to.
@@ -284,6 +298,12 @@ function normalizeIndexShape(idx) {
   // every collection before it.
   if (!Array.isArray(idx.swing_videos)) idx.swing_videos = [];
   if (!Array.isArray(idx.swing_analyses)) idx.swing_analyses = [];
+  if (!Array.isArray(idx.practice_sessions)) idx.practice_sessions = [];
+  for (const p of idx.practice_sessions) {
+    if (!p.status) p.status = p.ended_at ? 'finished' : 'active';
+    if (p.focus_snapshot === undefined) p.focus_snapshot = null;
+    if (p.goal_snapshot === undefined) p.goal_snapshot = null;
+  }
   for (const v of idx.swing_videos) {
     if (!v.camera_view) v.camera_view = 'unknown';
     if (!v.media_state) v.media_state = 'present';
@@ -390,6 +410,8 @@ export function __resetForTests() {
   _index = null;
   _shotsCache.clear();
   _holesCache.clear();
+  _chipsCache.clear();
+  _puttsCache.clear();
 }
 
 // Reassembles the old flat {sessions, shots, settings} shape from the index
@@ -2882,4 +2904,262 @@ export function importFullDB(obj) {
   }
 
   return getDB();
+}
+
+// ---------- Practice: Chipping and Putting ----------
+//
+// docs/practice-spec.md §5 and §17. Deliberately NOT the Range Shot model.
+//
+// The central difference is where context lives (§3). A golfer at the range
+// changes club constantly, so every Shot snapshots its own setup. A golfer
+// chipping picks a spot and hits fifteen balls from it, so the setup belongs
+// to the SESSION and a material change of context starts a new one. Chips
+// and putts still carry the context denormalised, so correcting a setup at
+// the start never retroactively relabels balls already hit.
+//
+// Range sessions, rounds, lessons and swing videos are untouched by any of
+// this. Practice data is purely additive: an index written before this
+// existed simply gains an empty array on its next read.
+
+function loadChipsChunk(sessionId) {
+  if (_chipsCache.has(sessionId)) return _chipsCache.get(sessionId);
+  let chips = [];
+  try {
+    const raw = localStorage.getItem(chipsKeyFor(sessionId));
+    chips = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(chips)) chips = [];
+  } catch (e) {
+    console.error('Next Ball: failed to load chips for a session, starting it empty', e);
+    chips = [];
+  }
+  _chipsCache.set(sessionId, chips);
+  return chips;
+}
+
+function saveChipsChunk(sessionId) {
+  try {
+    localStorage.setItem(chipsKeyFor(sessionId), JSON.stringify(_chipsCache.get(sessionId) || []));
+    return true;
+  } catch (e) {
+    console.error('Next Ball: failed to save chips for a session', e);
+    return false;
+  }
+}
+
+function loadPuttsChunk(sessionId) {
+  if (_puttsCache.has(sessionId)) return _puttsCache.get(sessionId);
+  let putts = [];
+  try {
+    const raw = localStorage.getItem(puttsKeyFor(sessionId));
+    putts = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(putts)) putts = [];
+  } catch (e) {
+    console.error('Next Ball: failed to load putts for a session, starting it empty', e);
+    putts = [];
+  }
+  _puttsCache.set(sessionId, putts);
+  return putts;
+}
+
+function savePuttsChunk(sessionId) {
+  try {
+    localStorage.setItem(puttsKeyFor(sessionId), JSON.stringify(_puttsCache.get(sessionId) || []));
+    return true;
+  } catch (e) {
+    console.error('Next Ball: failed to save putts for a session', e);
+    return false;
+  }
+}
+
+// Only one activity may be live at a time — the same rule Range and Course
+// already share.
+export function getActivePracticeSession() {
+  return loadIndex().practice_sessions.find((p) => p.status === 'active') || null;
+}
+
+export function getPracticeSession(id) {
+  return loadIndex().practice_sessions.find((p) => p.session_id === id) || null;
+}
+
+export function listPracticeSessions({ mode = null } = {}) {
+  const arr = loadIndex().practice_sessions;
+  return arr
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => !mode || p.mode === mode)
+    .sort((a, b) => String(b.p.created_at).localeCompare(String(a.p.created_at)) || (b.i - a.i))
+    .map(({ p }) => p);
+}
+
+export function listFinishedPracticeSessions({ mode = null } = {}) {
+  return listPracticeSessions({ mode }).filter((p) => p.status === 'finished');
+}
+
+// `setup` is the session context and is copied onto every rep. `focus_snapshot`
+// and `goal_snapshot` are COPIES taken now (§19, §20) — the same rule
+// lesson-spec.md §5.2 established for swing_focus_id, and for the same
+// reason: editing a Focus later must not rewrite what was practised under it.
+export function createPracticeSession(fields = {}) {
+  const index = loadIndex();
+  const ts = nowISO();
+  const session = {
+    session_id: uuid(),
+    mode: fields.mode,
+    // Putting only: 'short' | 'distance' | 'mixed'. Null for chipping.
+    kind: fields.kind || null,
+    // Which drill template is running. Chipping: standard | landing_zone |
+    // around_green | up_and_down. Putting: short | distance | mixed |
+    // pressure_finish.
+    practice_type: fields.practice_type || 'standard',
+    date: fields.date || ts.slice(0, 10),
+    started_at: nowISOLocal(),
+    ended_at: null,
+    status: 'active',
+    setup: { ...(fields.setup || {}) },
+    focus_snapshot: fields.focus_snapshot ?? null,
+    goal_snapshot: fields.goal_snapshot ?? null,
+    data_source: fields.data_source || 'user',
+    created_at: ts,
+    updated_at: ts,
+  };
+  index.practice_sessions.push(session);
+  if (!saveIndex()) { index.practice_sessions.pop(); return null; }
+  return session;
+}
+
+export function updatePracticeSession(id, patch) {
+  const index = loadIndex();
+  const p = index.practice_sessions.find((x) => x.session_id === id);
+  if (!p) return null;
+  Object.assign(p, patch, { updated_at: nowISO() });
+  saveIndex();
+  return p;
+}
+
+export function finishPracticeSession(id) {
+  return updatePracticeSession(id, { status: 'finished', ended_at: nowISOLocal() });
+}
+
+export function listChips(sessionId) { return loadChipsChunk(sessionId).slice(); }
+export function listPutts(sessionId) { return loadPuttsChunk(sessionId).slice(); }
+
+export function practiceRepCount(session) {
+  if (!session) return 0;
+  return session.mode === 'putting' ? loadPuttsChunk(session.session_id).length : loadChipsChunk(session.session_id).length;
+}
+
+// Writes one chip. The session's setup is denormalised onto it so history
+// keeps the conditions it was actually hit under.
+//
+// Around the Green (§13) passes no lie and no distance, and they are stored
+// ABSENT rather than guessed — a variable-practice ball genuinely has no
+// recorded situation, and inventing one would let it reach a by-lie
+// comparison it must never reach.
+export function addChip(sessionId, chip = {}) {
+  const session = getPracticeSession(sessionId);
+  if (!session) return null;
+  const chips = loadChipsChunk(sessionId);
+  const setup = session.setup || {};
+  const variable = session.practice_type === 'around_green';
+  const record = {
+    chip_id: uuid(),
+    ts: nextShotTimestamp(chips.length ? chips[chips.length - 1].ts : null),
+    club: setup.club ?? null,
+    surface: setup.surface ?? null,
+    lie: variable ? null : (setup.lie ?? null),
+    distance_yds: variable ? null : (setup.distance_yds ?? null),
+    contact: chip.contact ?? null,
+    prox_bucket: chip.prox_bucket ?? null,
+    // §9: two independent axes, both optional, both frequently absent.
+    miss_depth: chip.miss_depth ?? null,
+    miss_lateral: chip.miss_lateral ?? null,
+    // Landing Zone only.
+    zone_hit: chip.zone_hit ?? null,
+    // Up & Down only. 0 when the chip was holed (§12).
+    putts: chip.putts ?? null,
+    practice_type: session.practice_type,
+    created_at: nowISO(),
+  };
+  chips.push(record);
+  if (!saveChipsChunk(sessionId)) { chips.pop(); return null; }
+  updatePracticeSession(sessionId, {});
+  return record;
+}
+
+export function updateChip(sessionId, chipId, patch) {
+  const chips = loadChipsChunk(sessionId);
+  const c = chips.find((x) => x.chip_id === chipId);
+  if (!c) return null;
+  Object.assign(c, patch);
+  saveChipsChunk(sessionId);
+  return c;
+}
+
+export function deleteLastChip(sessionId) {
+  const chips = loadChipsChunk(sessionId);
+  if (!chips.length) return null;
+  const removed = chips.pop();
+  if (!saveChipsChunk(sessionId)) { chips.push(removed); return null; }
+  return removed;
+}
+
+// Writes one putt. `distance_ft` comes from the session for short and
+// distance-control practice, and per rep for Mixed (§17), where the golfer
+// moves the ball each time.
+export function addPutt(sessionId, putt = {}) {
+  const session = getPracticeSession(sessionId);
+  if (!session) return null;
+  const putts = loadPuttsChunk(sessionId);
+  const setup = session.setup || {};
+  const record = {
+    putt_id: uuid(),
+    ts: nextShotTimestamp(putts.length ? putts[putts.length - 1].ts : null),
+    distance_ft: putt.distance_ft ?? setup.distance_ft ?? null,
+    surface: setup.surface ?? null,
+    result: putt.result ?? null,
+    // Lag only, and mandatory when lag: the §16 matrix captures proximity
+    // and pace in one tap, so a lag that is not holed always has both.
+    leave_bucket: putt.leave_bucket ?? null,
+    leave_dir: putt.leave_dir ?? null,
+    // Short putt only, optional.
+    miss_lateral: putt.miss_lateral ?? null,
+    miss_depth: putt.miss_depth ?? null,
+    practice_type: session.practice_type,
+    created_at: nowISO(),
+  };
+  putts.push(record);
+  if (!savePuttsChunk(sessionId)) { putts.pop(); return null; }
+  updatePracticeSession(sessionId, {});
+  return record;
+}
+
+export function updatePutt(sessionId, puttId, patch) {
+  const putts = loadPuttsChunk(sessionId);
+  const p = putts.find((x) => x.putt_id === puttId);
+  if (!p) return null;
+  Object.assign(p, patch);
+  savePuttsChunk(sessionId);
+  return p;
+}
+
+export function deleteLastPutt(sessionId) {
+  const putts = loadPuttsChunk(sessionId);
+  if (!putts.length) return null;
+  const removed = putts.pop();
+  if (!savePuttsChunk(sessionId)) { putts.push(removed); return null; }
+  return removed;
+}
+
+// Removes a practice session and its chunk together. Nothing else references
+// these records, so there is no cascade to consider.
+export function deletePracticeSession(id) {
+  const index = loadIndex();
+  const i = index.practice_sessions.findIndex((p) => p.session_id === id);
+  if (i < 0) return false;
+  const [removed] = index.practice_sessions.splice(i, 1);
+  if (!saveIndex()) { index.practice_sessions.splice(i, 0, removed); return false; }
+  try { localStorage.removeItem(chipsKeyFor(id)); } catch { /* already gone */ }
+  try { localStorage.removeItem(puttsKeyFor(id)); } catch { /* already gone */ }
+  _chipsCache.delete(id);
+  _puttsCache.delete(id);
+  return true;
 }

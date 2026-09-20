@@ -240,11 +240,13 @@ export function renderHome(root) {
       </div>
 
       ${choiceCardHtml({
-        id: 'rangeChoiceBtn',
+        id: 'practiceChoiceBtn',
         variant: 'primary',
         eyebrow: 'PRACTICE',
-        title: 'Range Session',
-        description: 'Log shots, drills, training aids, and practice goals.',
+        title: 'Practice',
+        // The three modes are named here but chosen one level down
+        // (practice-spec.md §1): Home holds two choices and does not grow.
+        description: 'Range &middot; Chipping &middot; Putting',
         iconPaths: ICON_RANGE_BALLS,
         focusText: db.getActiveSwingFocus()?.cue_text || null,
       })}
@@ -252,8 +254,8 @@ export function renderHome(root) {
         id: 'courseChoiceBtn',
         variant: 'secondary',
         eyebrow: 'PLAY',
-        title: 'Course Session',
-        description: 'Track holes, score, clubs used, and on-course notes.',
+        title: 'Play a Round',
+        description: 'Track your score, hole by hole.',
         iconPaths: ICON_COURSE_FLAG,
       })}
 
@@ -284,31 +286,18 @@ export function renderHome(root) {
     }
   });
 
-  const startRangeSession = () => {
-    if (hasDefaults) startWithDefaults(settings);
-    else location.hash = '#/start';
-  };
 
-  qs('#rangeChoiceBtn', root).addEventListener('click', () => {
-    // A paused ROUND blocks a new range session — one activity at a time.
-    if (activeRound) {
-      confirmSwitchActivity(root, {
-        title: 'End your round first?',
-        body: roundEndBody(activeRound),
-        confirmLabel: 'End Round & Practice',
-        onConfirm: () => { endRound(activeRound); startRangeSession(); },
-      });
-      return;
-    }
+  qs('#practiceChoiceBtn', root).addEventListener('click', () => {
+    // A live range session is still the thing the golfer means by
+    // "Practice", so it is resumed rather than buried behind a menu.
     if (activeSession) { location.hash = '#/active'; return; }
-    // §7.7: the sheet appears ONLY when there is an outstanding plan that
-    // can actually be practiced on a range. For the majority case — no plan
-    // — this tap goes straight through exactly as it always has.
-    if (activePlan && activePlan.status === 'saved' && isRangePracticable(activePlan.focus_type)) {
-      openRangeStartSheet(activePlan, startRangeSession);
-      return;
-    }
-    startRangeSession();
+    // Everything else — the round conflict, the saved-plan sheet — is
+    // RANGE-specific and has moved to the Range row inside Practice. Asking
+    // "end your round to practise?" before the golfer has said whether they
+    // mean chipping or putting would be asking too early, and showing a
+    // range plan sheet to someone heading for the putting green would be
+    // showing the wrong thing entirely.
+    location.hash = '#/practice';
   });
 
   qs('#courseChoiceBtn', root).addEventListener('click', () => {
@@ -579,4 +568,43 @@ export function openEndSessionSheet(session, onDone) {
     close();
     onDone(zeroShot);
   });
+}
+
+
+// Starting a Range session, wherever it is started from.
+//
+// This lived inline on Home until Practice gained its own select screen
+// (practice-spec.md §1). The decision it encodes — resume a live session,
+// end a conflicting round first, offer an outstanding practice plan — is
+// RANGE's, not Practice's, so it moved down with the Range row rather than
+// firing before the golfer has said which mode they mean.
+export function startRangeFlow(root) {
+  const settings = db.getSettings();
+  const activeSession = db.getActiveSession();
+  const activeRound = db.getActiveRound();
+  const activePlan = db.getActivePlan();
+
+  const start = () => {
+    if (settings.lastClub) startWithDefaults(settings);
+    else location.hash = '#/start';
+  };
+
+  if (activeSession) { location.hash = '#/active'; return; }
+  // A paused ROUND blocks a new range session — one activity at a time.
+  if (activeRound) {
+    confirmSwitchActivity(root, {
+      title: 'End your round first?',
+      body: roundEndBody(activeRound),
+      confirmLabel: 'End Round & Practice',
+      onConfirm: () => { endRound(activeRound); start(); },
+    });
+    return;
+  }
+  // course-mode-spec.md §7.7: the sheet appears ONLY for an outstanding plan
+  // that can actually be practised on a range.
+  if (activePlan && activePlan.status === 'saved' && isRangePracticable(activePlan.focus_type)) {
+    openRangeStartSheet(activePlan, start);
+    return;
+  }
+  start();
 }
