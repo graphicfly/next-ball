@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { resetDB } from './setup.js';
 import * as P from '../js/practice.js';
 import { shortGameOverview, puttingOverview, mayClaimTrend } from '../js/practiceProgress.js';
-import { roundsStatement, practiceStatement, boundaryBlocks } from '../js/practiceBoundary.js';
+import { roundsStatement, practiceStatement, boundaryBlocks, roundsInputFrom } from '../js/practiceBoundary.js';
+import fs from 'node:fs';
 
 function seedChipping(db, { sessions, chipsEach, surface = 'grass', practice_type = 'standard' }) {
   const made = [];
@@ -151,5 +152,56 @@ describe('Course and Practice never share a sentence', () => {
     assert.equal(blocks.focus, null);
     assert.equal(blocks.fromPractice, null);
     assert.ok(blocks.fromRounds, 'rounds can still speak for themselves');
+  });
+});
+
+describe('The boundary is actually wired into Next Practice', () => {
+  const PLAN = fs.readFileSync(new URL('../js/screens/practicePlan.js', import.meta.url), 'utf8');
+
+  test('the plan screen renders both blocks separately', () => {
+    assert.match(PLAN, /boundaryBlocks/);
+    assert.match(PLAN, /From your rounds/);
+    assert.match(PLAN, /From your practice/);
+    // §23 rule 3: separate blocks, never one sentence.
+    assert.ok(!/fromRounds\.text\s*\+\s*|`\$\{evidence\.fromRounds\.text\}[^<]*\$\{evidence\.fromPractice/.test(PLAN),
+      'the two provenances must never be concatenated');
+  });
+
+  test('a lesson-derived plan has no rounds evidence', () => {
+    // A lesson has no rounds to speak from, so the block is absent rather
+    // than empty.
+    assert.match(PLAN, /src\.kind === 'round'/);
+  });
+
+  test('the rounds aggregator reads only what Course Mode records', async () => {
+    const db = await resetDB();
+    const course = db.upsertCourse({ name: 'QA', source: 'manual', hole_count: 9 });
+    const ids = [];
+    for (let r = 0; r < 3; r++) {
+      const round = db.createRound({ course_id: course.course_id, course_name: 'QA', date: '2026-09-1' + r, hole_count: 9 });
+      for (let h = 1; h <= 9; h++) db.upsertHole(round.round_id, h, { par: 4, score: 5, putts: h <= 2 ? 3 : 2, short_game_strokes: 1 });
+      db.finishRound(round.round_id);
+      ids.push(round.round_id);
+    }
+    const input = roundsInputFrom(db.listFinishedRounds(), db.getHolesForRound);
+    assert.equal(input.rounds, 3);
+    assert.equal(input.threePutts, 6, 'two three-putts per round across three rounds');
+    assert.equal(input.shortGameStrokes, 27);
+    // Nothing a round cannot observe may appear in the aggregate.
+    for (const key of Object.keys(input)) {
+      assert.ok(!/chip|lie|proximity|miss|distance_ft/.test(key), `${key} is not something a round knows`);
+    }
+  });
+
+  test('an unfinished or test round is not spoken from', async () => {
+    const db = await resetDB();
+    const course = db.upsertCourse({ name: 'QA', source: 'manual', hole_count: 9 });
+    const live = db.createRound({ course_id: course.course_id, course_name: 'QA', date: '2026-09-20', hole_count: 9 });
+    db.upsertHole(live.round_id, 1, { par: 4, score: 6, putts: 3 });
+    assert.equal(roundsInputFrom(db.listFinishedRounds(), db.getHolesForRound).rounds, 0);
+  });
+
+  test('one round is not "recently"', () => {
+    assert.equal(roundsStatement({ shortGameStrokes: 12, putts: 34, threePutts: 4, rounds: 1 }), null);
   });
 });

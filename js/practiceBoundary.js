@@ -77,6 +77,39 @@ export function practiceStatement(sessions, { chipsFor, puttsFor }) {
   return null;
 }
 
+// What the ROUNDS side knows, gathered from the rounds themselves.
+//
+// Kept here rather than in the screen so the boundary owns both halves of
+// its own vocabulary: this function may only read what Course Mode actually
+// records — strokes, putts, short-game strokes — and there is nowhere in it
+// to reach for a chip or a putt distance.
+//
+// `window` is how many recent finished rounds to speak from. A statement
+// about "recently" made from one round is not about recently.
+export function roundsInputFrom(rounds, holesFor, { window = 3 } = {}) {
+  const recent = rounds
+    .filter((r) => r.status === 'finished' && (r.data_source || 'user') !== 'test')
+    .slice(0, window);
+  if (!recent.length) return { rounds: 0 };
+
+  let putts = 0, shortGameStrokes = 0, threePutts = 0, holesPlayed = 0;
+  for (const r of recent) {
+    for (const h of holesFor(r.round_id) || []) {
+      // A played hole is one with strokes recorded. The field is `strokes`,
+      // not `score` — reading the wrong one skipped every hole and produced
+      // a silent, permanently empty block.
+      if (h.strokes == null) continue;
+      holesPlayed += 1;
+      if (h.putts != null) {
+        putts += h.putts;
+        if (h.putts >= 3) threePutts += 1;
+      }
+      if (h.short_game_strokes != null) shortGameStrokes += h.short_game_strokes;
+    }
+  }
+  return { rounds: recent.length, holesPlayed, putts, shortGameStrokes, threePutts };
+}
+
 // The two blocks together, never merged.
 //
 // Returns them as a pair so a caller cannot accidentally concatenate them

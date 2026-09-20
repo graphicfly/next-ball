@@ -3,6 +3,7 @@ import { qs, escapeHtml, toast, trapSheetFocus, presentSheet, commitOnce } from 
 import { practiceFocus, isRangePracticable } from '../roundAnalysis.js';
 import { lessonPracticeFocus } from '../lessonPlan.js';
 import { setPendingPlanId } from '../state.js';
+import { boundaryBlocks, roundsInputFrom } from '../practiceBoundary.js';
 
 // Next Practice — docs/course-mode-spec.md §4.6, Reference E.
 //
@@ -78,6 +79,21 @@ export function renderPracticePlan(root, source) {
   // open a session with nothing to do with the plan.
   const startable = isSaved && saved.status === 'saved' && isRangePracticable(saved.focus_type);
 
+  // The evidence behind the plan, in two separate labelled blocks
+  // (practice-spec.md §23). Course identifies the CATEGORY; Practice
+  // identifies the PATTERN. They are never merged into one sentence and
+  // neither explains the other — the module that produces them has no way
+  // to express a causal claim joining them, which is the point.
+  //
+  // Only for a round-derived plan: a lesson has no rounds to speak from.
+  const evidence = src.kind === 'round'
+    ? boundaryBlocks(
+      roundsInputFrom(db.listFinishedRounds(), db.getHolesForRound),
+      db.listFinishedPracticeSessions(),
+      { chipsFor: db.listChips, puttsFor: db.listPutts },
+    )
+    : { fromRounds: null, fromPractice: null, focus: null };
+
   root.innerHTML = `
     <div class="screen">
       <div class="course-hero compact">
@@ -100,6 +116,20 @@ export function renderPracticePlan(root, source) {
             <span><b>Goal:</b> ${escapeHtml(goal)}</span>
           </div>
         </div>
+
+        ${evidence.fromRounds || evidence.fromPractice ? `
+          <div class="evidence-blocks">
+            ${evidence.fromRounds ? `
+              <div class="evidence-block from-rounds">
+                <div class="evidence-label">From your rounds</div>
+                <div class="evidence-text">${escapeHtml(evidence.fromRounds.text)}</div>
+              </div>` : ''}
+            ${evidence.fromPractice ? `
+              <div class="evidence-block from-practice">
+                <div class="evidence-label">From your practice</div>
+                <div class="evidence-text">${escapeHtml(evidence.fromPractice.text)}</div>
+              </div>` : ''}
+          </div>` : ''}
 
         <div class="card">
           <div class="card-eyebrow">Your Practice Plan</div>

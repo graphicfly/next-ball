@@ -4355,3 +4355,21 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
 }
 /* SVG result zones carry the ring on the shape itself. */
 .prox-zone:focus-visible { outline: none; stroke: var(--color-accent); stroke-width: 4; }
+
+/* Course and Practice evidence, side by side and never merged
+   (practice-spec.md §23 rule 3). Separate accents, because the whole point
+   is that the reader can tell which half of the app is speaking. */
+.evidence-blocks { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); }
+.evidence-block {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border-left: 3px solid var(--color-divider);
+}
+.evidence-block.from-rounds { border-left-color: var(--color-accent); }
+.evidence-block.from-practice { border-left-color: var(--color-text-secondary); }
+.evidence-label {
+  font-size: var(--text-section); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--color-text-secondary); margin-bottom: 4px;
+}
+.evidence-text { font-size: var(--text-body); }
