@@ -17,13 +17,16 @@ import {
 
 const DEFAULTS_KEY = 'lastChippingSetup';
 
-function chipRow(label, name, options, current) {
+// Uses the app's existing pill component rather than a new one. An earlier
+// pass invented a `.chip` class that no stylesheet defined, so every
+// selector rendered as a bare white button.
+function pillRow(label, name, options, current) {
   return `
     <div class="setup-block">
       <div class="setup-label">${escapeHtml(label)}</div>
-      <div class="chip-row" role="radiogroup" aria-label="${escapeHtml(label)}">
+      <div class="pill-select" role="radiogroup" aria-label="${escapeHtml(label)}">
         ${options.map((o) => `
-          <button type="button" class="chip ${o.value === current ? 'selected' : ''}" role="radio"
+          <button type="button" class="pill ${o.value === current ? 'active' : ''}" role="radio"
                   aria-checked="${o.value === current}" data-name="${name}" data-value="${escapeHtml(String(o.value))}">
             ${escapeHtml(o.label)}
           </button>`).join('')}
@@ -52,13 +55,13 @@ export function renderChippingSetup(root) {
           <span class="side-space"></span>
         </div>
         <div class="scroll">
-          ${chipRow('Club', 'club', CHIP_CLUBS.map((c) => ({ value: c, label: c })), state.club)}
-          ${chipRow('Lie', 'lie', LIES.map((l) => ({ value: l, label: LIE_LABELS[l] })), state.lie)}
-          ${chipRow('Surface', 'surface', SURFACES.map((s) => ({ value: s, label: SURFACE_LABELS[s] })), state.surface)}
-          ${chipRow('Distance to hole', 'distance_yds',
+          ${pillRow('Club', 'club', CHIP_CLUBS.map((c) => ({ value: c, label: c })), state.club)}
+          ${pillRow('Lie', 'lie', LIES.map((l) => ({ value: l, label: LIE_LABELS[l] })), state.lie)}
+          ${pillRow('Surface', 'surface', SURFACES.map((s) => ({ value: s, label: SURFACE_LABELS[s] })), state.surface)}
+          ${pillRow('Distance to hole', 'distance_yds',
             CHIP_DISTANCES.map((d) => ({ value: d, label: `${d} yd` })).concat([{ value: 'custom', label: 'Custom' }]),
             state.distance_yds)}
-          <p class="tiny muted setup-note">Distance is your estimate of the shot you are practising, not a measurement.</p>
+          <p class="tiny muted setup-note">Distance is your estimate of the shot you are practicing, not a measurement.</p>
 
           <div class="setup-block">
             <div class="setup-label">Practice type</div>
@@ -86,7 +89,7 @@ export function renderChippingSetup(root) {
 
     qs('#backBtn', root).addEventListener('click', () => { location.hash = '#/practice'; });
 
-    qsa('.chip[data-name]', root).forEach((btn) => {
+    qsa('.pill[data-name]', root).forEach((btn) => {
       btn.addEventListener('click', () => {
         const { name, value } = btn.dataset;
         if (name === 'distance_yds' && value === 'custom') {

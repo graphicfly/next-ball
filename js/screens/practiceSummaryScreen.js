@@ -58,12 +58,12 @@ export function renderPracticeSummary(root, sessionId) {
 
         ${session.focus_snapshot ? `
           <div class="practice-focus">
-            <span class="practice-focus-label">Practised under</span>
+            <span class="practice-focus-label">Practiced under</span>
             <span class="practice-focus-text">${escapeHtml(session.focus_snapshot.cue_text)}</span>
           </div>` : ''}
 
         <button class="btn btn-primary btn-hero" id="doneBtn">Done</button>
-        <button class="capture-link practice-again" id="againBtn">Practise again</button>
+        <button class="capture-link practice-again" id="againBtn">Practice again</button>
       </div>
     </div>`;
 

@@ -65,18 +65,18 @@ export function renderPuttingSetup(root, drillId) {
           ${needsDistance ? `
             <div class="setup-block">
               <div class="setup-label">Distance</div>
-              <div class="chip-row" role="radiogroup" aria-label="Distance">
+              <div class="pill-select" role="radiogroup" aria-label="Distance">
                 ${distances.map((d) => `
-                  <button type="button" class="chip ${d === state.distance_ft ? 'selected' : ''}" role="radio"
+                  <button type="button" class="pill ${d === state.distance_ft ? 'active' : ''}" role="radio"
                           aria-checked="${d === state.distance_ft}" data-name="distance_ft" data-value="${d}">${d} ft</button>`).join('')}
-                <button type="button" class="chip" data-name="distance_ft" data-value="custom">Custom</button>
+                <button type="button" class="pill" data-name="distance_ft" data-value="custom">Custom</button>
               </div>
             </div>` : ''}
           <div class="setup-block">
             <div class="setup-label">Surface</div>
-            <div class="chip-row" role="radiogroup" aria-label="Surface">
+            <div class="pill-select" role="radiogroup" aria-label="Surface">
               ${PUTT_SURFACES.map((s) => `
-                <button type="button" class="chip ${s === state.surface ? 'selected' : ''}" role="radio"
+                <button type="button" class="pill ${s === state.surface ? 'active' : ''}" role="radio"
                         aria-checked="${s === state.surface}" data-name="surface" data-value="${s}">${PUTT_SURFACE_LABELS[s]}</button>`).join('')}
             </div>
           </div>
@@ -91,7 +91,7 @@ export function renderPuttingSetup(root, drillId) {
 
     qs('#backBtn', root).addEventListener('click', () => { location.hash = '#/putting/select'; });
 
-    qsa('.chip[data-name]', root).forEach((btn) => {
+    qsa('.pill[data-name]', root).forEach((btn) => {
       btn.addEventListener('click', () => {
         const { name, value } = btn.dataset;
         if (name === 'distance_ft' && value === 'custom') {
