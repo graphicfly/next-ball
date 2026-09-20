@@ -162,7 +162,7 @@ function renderHole(root, roundId, holeNumber) {
           <button class="back" id="finishBtn">Finish</button>
         </div>
         <div class="course-hero-content">
-          <h1 class="course-hero-title">Course Session</h1>
+          <h1 class="course-hero-title">Your Round</h1>
           <div class="course-hero-sub">Track your round, one hole at a time.</div>
         </div>
       </div>

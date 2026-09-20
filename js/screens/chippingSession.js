@@ -242,6 +242,16 @@ export function renderChippingSession(root, sessionId) {
         afterCommit(isHoled(bucket) ? 'HOLED' : PROX_LABELS[bucket], isHoled(bucket) ? 'good' : '');
       });
     });
+    // An SVG circle is not a button, so it takes no keyboard activation of
+    // its own. The rings are the primary interaction of the whole screen and
+    // must not be mouse-only.
+    qsa('.prox-zone', root).forEach((zone) => {
+      zone.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        zone.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+    });
     // Labels sit above the rings, so a tap on the text must count as a tap
     // on its band rather than doing nothing.
     qsa('.prox-label', root).forEach((label) => {

@@ -49,7 +49,8 @@ export function proximityTargetHtml() {
   return `
     <svg class="prox-target" viewBox="0 0 360 360" role="group" aria-label="How close did it finish?">
       ${RINGS.map(({ bucket, r }) => `
-        <circle class="prox-zone" data-bucket="${bucket}" cx="${cx}" cy="${cy}" r="${r}">
+        <circle class="prox-zone" data-bucket="${bucket}" cx="${cx}" cy="${cy}" r="${r}"
+                role="button" tabindex="0" aria-label="${escapeHtml(PROX_LABELS[bucket])}">
           <title>${escapeHtml(PROX_LABELS[bucket])}</title>
         </circle>`).join('')}
       ${labels.map(({ bucket, x, y }) => `

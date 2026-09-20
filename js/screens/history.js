@@ -251,8 +251,10 @@ export function renderHistory(root) {
       // "Round" meant a bucket of balls when this copy was written. Course
       // Mode gave the word a second meaning, so it is avoided here and both
       // kinds of activity are named instead.
-      body: 'Range sessions and course rounds both show up here, ready to compare and revisit.',
-      actionLabel: 'Start Range Session',
+      // Chipping and putting sessions land here too now, so the copy names
+      // practice rather than only the range.
+      body: 'Practice sessions and course rounds both show up here, ready to compare and revisit.',
+      actionLabel: 'Start Practicing',
       actionId: 'emptyStartBtn',
     });
 
@@ -276,7 +278,7 @@ export function renderHistory(root) {
   `;
 
   qs('#homeBtn', root).addEventListener('click', () => { location.hash = '#/home'; });
-  qs('#emptyStartBtn', root)?.addEventListener('click', () => { location.hash = '#/start'; });
+  qs('#emptyStartBtn', root)?.addEventListener('click', () => { location.hash = '#/practice'; });
   qs('#addLessonBtn', root).addEventListener('click', () => { location.hash = '#/lesson/new'; });
 
   qsa('.filter-chip', root).forEach((chip) => {

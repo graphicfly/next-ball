@@ -3605,8 +3605,12 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   gap: var(--space-2);
   margin-bottom: var(--space-3);
   flex-shrink: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  /* Wraps rather than scrolls. Four chips fitted one row; Chipping and
+     Putting made six, which pushed Rounds and Lessons off the right edge of
+     a 375px screen with nothing on screen to suggest they were there. A
+     horizontal scroller you cannot see the end of hides its own contents. */
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
 }
 .history-filters::-webkit-scrollbar { display: none; }
 .filter-chip {
@@ -3618,7 +3622,7 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   font-size: var(--text-label);
   font-weight: var(--weight-medium);
   padding: 7px 14px;
-  min-height: 34px;
+  min-height: 44px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
@@ -4338,3 +4342,16 @@ svg.chart .chart-axis-line { stroke: var(--color-divider); stroke-width: 1; }
   cursor: pointer; touch-action: manipulation;
 }
 .practice-secondary:disabled { opacity: 0.35; }
+
+
+/* A visible focus ring for everything that takes focus.
+   Individual components (direction zones, strike tiles, the map pill) had
+   their own; everything else fell back to the browser default, which on a
+   near-black surface with custom buttons is close to invisible. */
+:where(button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 8px);
+}
+/* SVG result zones carry the ring on the shape itself. */
+.prox-zone:focus-visible { outline: none; stroke: var(--color-accent); stroke-width: 4; }
